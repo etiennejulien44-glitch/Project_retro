@@ -1,0 +1,100 @@
+# config.py
+import math
+
+# ---------------------------------------------------------------------------
+# Caméra / écran
+# ---------------------------------------------------------------------------
+DEPART_X = 0.0
+DEPART_Z = -500.0
+
+cam_x = DEPART_X
+cam_y = 0.0
+cam_z = DEPART_Z
+yaw = 0.0
+pitch = 0.0
+vitesse_y = 0.0
+gravite = 600.0
+
+LARGEUR = 1920
+HAUTEUR = 1080
+FOCALE = 500.0
+DIST_AFFICHAGE_MAX = 1800.0
+NEAR = 20.0   # plan de coupe proche (les quads qui le traversent sont découpés)
+
+COS_YAW = 1.0
+SIN_YAW = 0.0
+COS_PITCH = 1.0
+SIN_PITCH = 0.0
+
+TAILLE_CHUNKS = 20
+ECHELLE_GRILLE = 50
+EVAL_HAUTEUR = 140
+
+# OPTIMISATION
+PAS_GRILLE = 2       # doit diviser TAILLE_CHUNKS (20). 2 = grille dense synthwave ; si ça rame : 4 ou 5
+PORTEE_CHUNKS = 2    # 5x5 chunks visibles
+
+# ---------------------------------------------------------------------------
+# COULEURS SYNTHWAVE  (le ciel / le soleil / les étoiles sont dans ciel.py)
+# ---------------------------------------------------------------------------
+COULEUR_FOND = (8, 0, 28)
+COULEUR_REMPLISSAGE = (14, 0, 34)     # intérieur des polygones du sol : indigo très sombre
+
+# Bords de la grille : rose néon de près -> violet sombre de loin
+FOG_STEPS = 16
+TERRAIN_PROCHE = (255, 55, 200)
+TERRAIN_LOIN = (34, 4, 70)
+
+# ---------------------------------------------------------------------------
+# GAMEPLAY : joueur & armes
+# ---------------------------------------------------------------------------
+JOUEUR_PV_MAX = 100
+CHARGEUR_TAILLE = 15          # balles par chargeur
+MUNITIONS_RESERVE_DEPART = 45 # balles en réserve au départ
+MUNITIONS_RESERVE_MAX = 120
+RECHARGE_DUREE = 1.4          # secondes
+CADENCE_TIR = 0.18            # délai mini entre 2 tirs
+DEGATS_TIR = 1
+PORTEE_TIR = DIST_AFFICHAGE_MAX
+
+# Butin laissé par les monstres tués (probabilités)
+PACK_MUNITIONS = 15
+PACK_SOIN = 25
+DROP_MUNITIONS = 0.45
+DROP_SOIN = 0.20
+RAYON_RAMASSAGE = 70
+
+# ---------------------------------------------------------------------------
+# GAMEPLAY : ennemis
+# ---------------------------------------------------------------------------
+ZONE_SECURITE_DEPART = 800    # aucun monstre ne naît à moins de X unités du départ
+
+# Araignée : fonce au corps à corps
+ARAIGNEE_PV = 3
+ARAIGNEE_VITESSE = 150        # (le joueur court à 250 : on peut la semer)
+ARAIGNEE_AGGRO = 1000
+ARAIGNEE_PORTEE = 75
+ARAIGNEE_DEGATS = 10
+ARAIGNEE_COOLDOWN = 0.9
+
+# Drone : garde ses distances et tire des projectiles
+DRONE_PV = 2
+DRONE_VITESSE = 120
+DRONE_AGGRO = 1200
+DRONE_DIST_PREF = 550
+DRONE_PORTEE_TIR = 1000
+DRONE_COOLDOWN = 2.2
+PROJECTILE_VITESSE = 420      # esquivable en se déplaçant
+PROJECTILE_DEGATS = 8
+PROJECTILE_VIE = 4.0
+PROJECTILE_RAYON = 40
+
+
+def mettre_a_jour_rayons():
+    global COS_YAW, SIN_YAW, COS_PITCH, SIN_PITCH
+    rad_yaw = math.radians(yaw)
+    rad_pitch = math.radians(pitch)
+    COS_YAW = math.cos(rad_yaw)
+    SIN_YAW = math.sin(rad_yaw)
+    COS_PITCH = math.cos(rad_pitch)
+    SIN_PITCH = math.sin(rad_pitch)
