@@ -1,6 +1,7 @@
 # game_test.py  --  FPS rétro synthwave
 import math
 import sys
+import time
 from itertools import repeat
 from operator import itemgetter
 
@@ -9,38 +10,59 @@ import pygame
 
 import config
 import entity
+import boosts
+from boosts import StatsBoostes
 from entity import Joueur
-from renderer import vers_camera, ecran_depuis_camera, projeter_3d_masse, clipper_near
-from terrain import get_hauteur_sol, get_zone, reinitialiser_monde, monstres_caches
+from renderer import (vers_camera, ecran_depuis_camera, projeter_3d_masse,
+                      clipper_near, transformer_vertices_monde)
+from terrain import (get_hauteur_sol, get_zone, reinitialiser_monde,
+                     monstres_caches, chest_caches)
 from modeles import (MODELE_ARBRE, MODELE_ARAIGNEE, MODELE_DRONE,
-                     MODELE_MUNITIONS, MODELE_SOINS)
+                     MODELE_MUNITIONS, MODELE_SOINS,
+                     MODELE_CHEST, PRISMATIC_CHEST)
 from ciel import Ciel
 from hud import HUD, MUZZLE, CYAN, BLANC
 
 
 # ---------------------------------------------------------------------------
-# Précalculs
+# Échelles globales
 # ---------------------------------------------------------------------------
-def _aplatir_modele(modele):
-    return (np.array([l[0] for l in modele], dtype=np.float32),
-            np.array([l[1] for l in modele], dtype=np.float32))
+ECHELLE_ARBRE    = 1.0
+ECHELLE_ARAIGNEE = 1.0
+ECHELLE_DRONE    = 1.0
+ECHELLE_PICKUP   = 3.0        # ← plus visible
+ECHELLE_CHEST    = 1.0
+ECHELLE_BUTIN    = 22.0       # ← pyramides plus grosses
+
+DISTANCE_INTERACTION_COFFRE = 160
 
 
-ARBRE_P1, ARBRE_P2 = _aplatir_modele(MODELE_ARBRE)
-ARAIGNEE_P1, ARAIGNEE_P2 = _aplatir_modele(MODELE_ARAIGNEE)
-DRONE_P1, DRONE_P2 = _aplatir_modele(MODELE_DRONE)
-MUN_P1, MUN_P2 = _aplatir_modele(MODELE_MUNITIONS)
-SOIN_P1, SOIN_P2 = _aplatir_modele(MODELE_SOINS)
+def _aplatir_modele(modele, echelle=1.0):
+    P1 = np.array([l[0] for l in modele], dtype=np.float32) * echelle
+    P2 = np.array([l[1] for l in modele], dtype=np.float32) * echelle
+    return P1, P2
 
-# --- couleurs des éléments (palette synthwave) ---
-COULEUR_TRONC = (120, 70, 255)       # violet électrique
-COULEUR_FEUILLES = (40, 240, 255)    # cyan néon
+
+ARBRE_P1,    ARBRE_P2    = _aplatir_modele(MODELE_ARBRE,    ECHELLE_ARBRE)
+ARAIGNEE_P1, ARAIGNEE_P2 = _aplatir_modele(MODELE_ARAIGNEE, ECHELLE_ARAIGNEE)
+DRONE_P1,    DRONE_P2    = _aplatir_modele(MODELE_DRONE,    ECHELLE_DRONE)
+MUN_P1,      MUN_P2      = _aplatir_modele(MODELE_MUNITIONS, ECHELLE_PICKUP)
+SOIN_P1,     SOIN_P2     = _aplatir_modele(MODELE_SOINS,    ECHELLE_PICKUP)
+CHEST_P1,    CHEST_P2    = _aplatir_modele(MODELE_CHEST,      ECHELLE_CHEST)
+PRISMA_P1,   PRISMA_P2   = _aplatir_modele(PRISMATIC_CHEST,   ECHELLE_CHEST)
+PYR_P1,      PYR_P2      = _aplatir_modele(boosts.MODELE_PYRAMIDE, ECHELLE_BUTIN)
+
+
+COULEUR_TRONC = (120, 70, 255)
+COULEUR_FEUILLES = (40, 240, 255)
 ARBRE_COULEURS = [COULEUR_TRONC if l[0][1] == 0 else COULEUR_FEUILLES for l in MODELE_ARBRE]
-COULEUR_ARAIGNEE = (255, 130, 30)    # orange néon
-COULEUR_DRONE = (255, 235, 70)       # jaune électrique
+COULEUR_ARAIGNEE = (255, 130, 30)
+COULEUR_DRONE = (255, 235, 70)
 COULEUR_MUNITIONS = (60, 240, 255)
 COULEUR_SOIN = (120, 255, 150)
 COULEUR_TOUCHE = (255, 255, 255)
+COULEUR_CHEST = (255, 210, 90)
+COULEUR_CHEST_OUVERT = (255, 255, 255)
 
 
 def _build_fog_lut():
@@ -54,10 +76,10 @@ def _build_fog_lut():
 
 FOG_LUT = _build_fog_lut()
 FOG_MAX_INV = config.FOG_STEPS / config.DIST_AFFICHAGE_MAX
-DIST_BORD_EPAIS = 400    # en dessous : bords du terrain à 2 px, au delà : 1 px
-DIST_GLOW_TERRAIN = 600  # halo néon autour des bords proches
+DIST_BORD_EPAIS = 400
+DIST_GLOW_TERRAIN = 600
 DIST_GLOW_ENTITES = 900
-BIAIS_ENTITES = 150      # les entités passent devant le quad sur lequel elles reposent
+BIAIS_ENTITES = 150
 
 _GLOW = {}
 
@@ -84,13 +106,7 @@ def _tourner_y(P, a):
 
 
 # ---------------------------------------------------------------------------
-# Collecte des éléments à dessiner
-# Un item = (profondeur, genre, données, couleur)
-#   0 : quad de terrain complet      données = [[x, y] * 4]
-#   1 : entité simple (lignes)       données = [(p1, p2, couleur), ...]
-#   2 : quad coupé par le plan near  données = (points, flags_aretes)
-#   3 : entité néon (lignes + halo)  données = [(p1, p2, couleur), ...]
-#   4 : projectile ennemi            données = (p1, p2)
+# Terrain
 # ---------------------------------------------------------------------------
 def collecter_terrain(zone, items):
     rx, ry, rz = vers_camera(zone["pts"])
@@ -103,7 +119,6 @@ def collecter_terrain(zone, items):
     tous_proches = nA & nB & nC & nD
     tous_loin_ok = loin_ok[A] & loin_ok[B] & loin_ok[C] & loin_ok[D]
 
-    # --- quads entièrement devant la caméra : tout en numpy ---
     q = np.nonzero(tous_proches & tous_loin_ok)[0]
     if q.size:
         idx = np.stack((A[q], B[q], C[q], D[q]), axis=1)
@@ -118,7 +133,6 @@ def collecter_terrain(zone, items):
             couleurs = [FOG_LUT[i] for i in fog.tolist()]
             items.extend(zip(prof.tolist(), repeat(0), polys, couleurs))
 
-    # --- quads qui traversent le plan near : on les découpe ---
     partiels = np.nonzero((nA | nB | nC | nD) & ~tous_proches & tous_loin_ok)[0]
     W2, H2, F = config.LARGEUR * 0.5, config.HAUTEUR * 0.5, config.FOCALE
     for qi in partiels.tolist():
@@ -134,7 +148,6 @@ def collecter_terrain(zone, items):
 
 
 def _segments_entites(bases, P1, P2, couleurs_seg=None, couleurs_inst=None):
-    """Projette d'un coup tous les segments de toutes les instances d'un modèle."""
     k, m = len(bases), P1.shape[0]
     p1 = (bases[:, None, :] + P1[None, :, :]).reshape(-1, 3)
     p2 = (bases[:, None, :] + P2[None, :, :]).reshape(-1, 3)
@@ -168,7 +181,6 @@ def _barre_vie(ex, ey, rz, m):
 
 
 def collecter_entites(zone, items, temps):
-    # --- arbres ---
     bases = zone["arbres"]
     if len(bases):
         _, _, rz, v = projeter_3d_masse(bases)
@@ -179,7 +191,6 @@ def collecter_entites(zone, items, temps):
                 if segs:
                     items.append((p - BIAIS_ENTITES, 1, segs, None))
 
-    # --- monstres ---
     mons = [m for cle in zone["cles"] for m in monstres_caches[cle]]
     if mons:
         xs = np.array([m.x for m in mons])
@@ -206,10 +217,9 @@ def collecter_entites(zone, items, temps):
                 if m.hp < m.hp_max:
                     items.append((p - BIAIS_ENTITES - 5, 1, _barre_vie(int(ex[i]), int(ey[i]), p, m), None))
 
-    # --- butin (tourne sur lui-même et flotte) ---
     if entity.pickups:
-        arr = np.array(entity.pickups, dtype=np.float64)
-        bob = np.sin(temps * 3 + arr[:, 0] * 0.01) * 6
+        arr = np.array(entity.pickups, dtype=np.float64)   # [x, z, type, t]
+        bob = np.sin(temps * 3 + arr[:, 0] * 0.01) * 6 + 45
         pos = np.column_stack((arr[:, 0], get_hauteur_sol(arr[:, 0], arr[:, 1]) + bob, arr[:, 1])).astype(np.float32)
         _, _, rz, v = projeter_3d_masse(pos)
         ang = temps * 2.0
@@ -224,7 +234,6 @@ def collecter_entites(zone, items, temps):
                 if segs:
                     items.append((float(rz[i]) - BIAIS_ENTITES, 3, segs, None))
 
-    # --- projectiles ennemis ---
     if entity.projectiles:
         arr = np.array(entity.projectiles, dtype=np.float32)
         p0 = arr[:, :3]
@@ -238,19 +247,138 @@ def collecter_entites(zone, items, temps):
 
 
 # ---------------------------------------------------------------------------
-# Dessin des items
+# Coffres
+# ---------------------------------------------------------------------------
+def collecter_coffres(zone, items, temps):
+    for cle in zone["cles"]:
+        for chest in chest_caches[cle]:
+            pos = np.array([chest["x"], chest["y"], chest["z"]], dtype=np.float32)
+            R = chest["rotation"]
+            is_prisma = chest["type"] == "PRISMATIC_CHEST"
+            ouvert = chest["ouvert"]
+
+            if ouvert:
+                P1, P2 = (PRISMA_P1, PRISMA_P2) if is_prisma else (CHEST_P1, CHEST_P2)
+                base = COULEUR_CHEST_OUVERT
+            elif is_prisma:
+                P1, P2 = PRISMA_P1, PRISMA_P2
+                puls = 0.55 + 0.45 * math.sin(
+                    temps * 5 + chest["x"] * 0.13 + chest["z"] * 0.07)
+                base = (int(180 * puls + 60), int(60 + 130 * puls), 255)
+            else:
+                P1, P2 = CHEST_P1, CHEST_P2
+                base = COULEUR_CHEST
+
+            w1 = transformer_vertices_monde(R, pos, P1)
+            w2 = transformer_vertices_monde(R, pos, P2)
+            ax, ay, rz, va = projeter_3d_masse(w1)
+            bx, by, _, vb = projeter_3d_masse(w2)
+            ok = va & vb
+            if not ok.any():
+                continue
+            prof = float(rz[ok].mean()) - BIAIS_ENTITES
+            ax_i, ay_i = ax.tolist(), ay.tolist()
+            bx_i, by_i = bx.tolist(), by.tolist()
+            segs = [((ax_i[j], ay_i[j]), (bx_i[j], by_i[j]), base)
+                    for j in np.nonzero(ok)[0].tolist()]
+            if segs:
+                items.append((prof, 3, segs, None))
+
+
+# ---------------------------------------------------------------------------
+# Butins pyramides (avec pop-in visible)
+# ---------------------------------------------------------------------------
+def collecter_butins(items, temps):
+    if not boosts.butins_au_sol:
+        return
+    butins = boosts.butins_au_sol
+    k = len(butins)
+    xs = np.array([b.x for b in butins], dtype=np.float32)
+    zs = np.array([b.z for b in butins], dtype=np.float32)
+    ph = np.array([b.phase for b in butins], dtype=np.float32)
+    spawn = np.array([b.spawn_time for b in butins], dtype=np.float64)
+
+    # Pop-in : grandit de 0.3 à 1 sur 0.35 s, et descend de +120 à +30
+    age = np.clip(temps - spawn, 0.0, 0.35)
+    t_anim = age / 0.35
+    scale = 0.3 + 0.7 * t_anim
+    y_offset = (1.0 - t_anim) * 120.0 + 30.0
+
+    bob = np.sin(temps * 3 + ph) * 6
+    ys = (get_hauteur_sol(xs, zs) + bob + y_offset).astype(np.float32)
+
+    ang = temps * 2.0
+    c, s = math.cos(ang), math.sin(ang)
+
+    for i in range(k):
+        sc = float(scale[i])
+        P1r = PYR_P1 * sc
+        P2r = PYR_P2 * sc
+        P1r = np.column_stack((
+            PYR_P1[:, 0] * c * sc + PYR_P1[:, 2] * s * sc,
+            PYR_P1[:, 1] * sc,
+            -PYR_P1[:, 0] * s * sc + PYR_P1[:, 2] * c * sc,
+        )).astype(np.float32)
+        P2r = np.column_stack((
+            PYR_P2[:, 0] * c * sc + PYR_P2[:, 2] * s * sc,
+            PYR_P2[:, 1] * sc,
+            -PYR_P2[:, 0] * s * sc + PYR_P2[:, 2] * c * sc,
+        )).astype(np.float32)
+
+        base_pos = np.array([xs[i], ys[i], zs[i]], dtype=np.float32)
+        p1w = (base_pos[None, :] + P1r).astype(np.float32)
+        p2w = (base_pos[None, :] + P2r).astype(np.float32)
+        ax, ay, rz, va = projeter_3d_masse(p1w)
+        bx, by, _, vb = projeter_3d_masse(p2w)
+        ok = va & vb
+        if not ok.any():
+            continue
+        base = boosts.COULEURS_RARETE[butins[i].rarete]
+        ax_i, ay_i = ax.tolist(), ay.tolist()
+        bx_i, by_i = bx.tolist(), by.tolist()
+        segs = [((ax_i[j], ay_i[j]), (bx_i[j], by_i[j]), base)
+                for j in np.nonzero(ok)[0].tolist()]
+        if segs:
+            prof = float(rz[ok].mean()) - BIAIS_ENTITES
+            items.append((prof, 3, segs, None))
+
+
+# ---------------------------------------------------------------------------
+# Interaction coffres
+# ---------------------------------------------------------------------------
+def ouvrir_coffre_proche(zone, joueur_x, joueur_z, distance=DISTANCE_INTERACTION_COFFRE):
+    meilleur = None
+    meilleure_dist = distance
+    for cle in zone["cles"]:
+        for chest in chest_caches[cle]:
+            if chest["ouvert"]:
+                continue
+            d = math.hypot(chest["x"] - joueur_x, chest["z"] - joueur_z)
+            if d < meilleure_dist:
+                meilleure_dist = d
+                meilleur = chest
+    if meilleur is None:
+        return None
+    meilleur["ouvert"] = True
+    butin = boosts.tirer_butin(meilleur["type"], meilleur["x"], meilleur["z"])
+    boosts.spawner_butin(butin)
+    return butin
+
+
+# ---------------------------------------------------------------------------
+# Dessin
 # ---------------------------------------------------------------------------
 def dessiner_items(surf, items):
-    items.sort(key=itemgetter(0), reverse=True)    # du plus loin au plus proche
+    items.sort(key=itemgetter(0), reverse=True)
     poly, ligne = pygame.draw.polygon, pygame.draw.line
     noir = config.COULEUR_REMPLISSAGE
 
     for prof, genre, data, col in items:
         if genre == 0:
-            poly(surf, noir, data)                                         # remplissage sombre
+            poly(surf, noir, data)
             if prof < DIST_GLOW_TERRAIN:
-                poly(surf, glow_de(col), data, 4)                          # halo néon
-            poly(surf, col, data, 2 if prof < DIST_BORD_EPAIS else 1)      # bords néon
+                poly(surf, glow_de(col), data, 4)
+            poly(surf, col, data, 2 if prof < DIST_BORD_EPAIS else 1)
         elif genre == 1:
             for p1, p2, c in data:
                 ligne(surf, c, p1, p2, 2)
@@ -274,7 +402,7 @@ def dessiner_items(surf, items):
 
 
 # ---------------------------------------------------------------------------
-# Le jeu
+# Jeu
 # ---------------------------------------------------------------------------
 class Jeu:
     def __init__(self, surface):
@@ -282,14 +410,21 @@ class Jeu:
         self.joueur = Joueur()
         self.ciel = Ciel()
         self.hud = HUD()
+        self.stats = StatsBoostes()
         self.tir_t = 0.0
         self.tir_fin = None
         self.zone = None
+        self.popup_text = ""
+        self.popup_timer = 0.0
+        self.popup_color = (255, 255, 255)
+        self.font_popup = pygame.font.SysFont(None, 56)
         self.reinitialiser()
 
     def reinitialiser(self):
         reinitialiser_monde()
         entity.reinitialiser_entites()
+        boosts.vider_butins()
+        self.stats = StatsBoostes()
         config.cam_x, config.cam_z = config.DEPART_X, config.DEPART_Z
         config.cam_y = get_hauteur_sol(config.cam_x, config.cam_z) - 30
         config.yaw = config.pitch = config.vitesse_y = 0.0
@@ -297,6 +432,8 @@ class Jeu:
         self.joueur.reinitialiser()
         self.tir_t = 0.0
         self.tir_fin = None
+        self.popup_text = ""
+        self.popup_timer = 0.0
         self._maj_zone()
 
     def _maj_zone(self):
@@ -304,7 +441,6 @@ class Jeu:
         self.zone = get_zone(int(math.floor(config.cam_x / t)),
                              int(math.floor(config.cam_z / t)), config.PORTEE_CHUNKS)
 
-    # --- actions ---
     def regarder(self, rel_x, rel_y):
         if self.joueur.mort:
             return
@@ -316,7 +452,21 @@ class Jeu:
         if not j.tenter_tir():
             return
         self.tir_t = 0.10
-        self.tir_fin, _, _ = entity.tirer_laser(self.zone["cles"], j)
+        mult = self.stats.degats_mult
+        base_degats = config.DEGATS_TIR
+        config.DEGATS_TIR = base_degats * mult
+        try:
+            self.tir_fin, _, _ = entity.tirer_laser(self.zone["cles"], j)
+        finally:
+            config.DEGATS_TIR = base_degats
+
+    def interagir_coffre(self):
+        butin = ouvrir_coffre_proche(self.zone, config.cam_x, config.cam_z)
+        if butin is None:
+            return
+        self.popup_text = f"+ {butin.nom}"
+        self.popup_timer = 2.0
+        self.popup_color = boosts.COULEURS_RARETE[butin.rarete]
 
     def recharger(self):
         if self.joueur.mort:
@@ -324,23 +474,24 @@ class Jeu:
         else:
             self.joueur.lancer_recharge()
 
-    # --- simulation ---
     def mettre_a_jour(self, dt, temps, avant, cote, saut):
         config.mettre_a_jour_rayons()
         j = self.joueur
         j.mettre_a_jour(dt)
+        self.stats.update(dt, j)
         self.tir_t = max(0.0, self.tir_t - dt)
+        self.popup_timer = max(0.0, self.popup_timer - dt)
         if j.mort:
             return
 
-        vitesse = 250 * dt
+        vitesse = 250 * self.stats.vitesse_mult * dt
         rad = math.radians(config.yaw)
         config.cam_x += (avant * math.sin(rad) + cote * math.cos(rad)) * vitesse
         config.cam_z += (avant * math.cos(rad) - cote * math.sin(rad)) * vitesse
 
         sol = get_hauteur_sol(config.cam_x, config.cam_z) - 30
         if saut and abs(config.cam_y - sol) < 2:
-            config.vitesse_y = -300
+            config.vitesse_y = -300 * self.stats.saut_mult
         config.vitesse_y += config.gravite * dt
         config.cam_y += config.vitesse_y * dt
         if config.cam_y > sol:
@@ -348,23 +499,25 @@ class Jeu:
             config.vitesse_y = 0
 
         self._maj_zone()
+        boosts.ramasser_butins(j, self.stats, config.cam_x, config.cam_z)
+
         entity.mettre_a_jour_monstres(dt, self.zone["cles"], j, temps)
         entity.mettre_a_jour_projectiles(dt, j)
         entity.mettre_a_jour_pickups(j)
 
-    # --- rendu ---
     def rendre(self, temps):
         surf = self.surf
         self.ciel.dessiner(surf, temps)
 
         items = []
         collecter_terrain(self.zone, items)
+        collecter_coffres(self.zone, items, temps)
+        collecter_butins(items, temps)
         collecter_entites(self.zone, items, temps)
         dessiner_items(surf, items)
 
         j = self.joueur
         if not j.mort:
-            # rayon + flash de bouche
             if self.tir_t > 0:
                 fin = self.tir_fin or (config.LARGEUR // 2, config.HAUTEUR // 2)
                 pygame.draw.line(surf, (30, 140, 160), MUZZLE, fin, 7)
@@ -374,6 +527,23 @@ class Jeu:
                 pygame.draw.circle(surf, CYAN, MUZZLE, 20, 2)
             self.hud.dessiner_arme(surf, j, self.tir_t / 0.10)
         self.hud.dessiner(surf, j, temps)
+
+        # Popup de butin
+        if self.popup_timer > 0 and self.popup_text:
+            alpha = min(1.0, self.popup_timer / 0.4)   # fondu sur les 0.4 dernières s
+            color = self.popup_color
+            txt = self.font_popup.render(self.popup_text, True, color)
+            # Fond sombre semi-transparent
+            pad = 16
+            bg = pygame.Surface((txt.get_width() + pad * 2, txt.get_height() + pad),
+                                pygame.SRCALPHA)
+            bg.fill((0, 0, 0, int(140 * alpha)))
+            cx = config.LARGEUR // 2
+            cy = config.HAUTEUR - 260
+            surf.blit(bg, (cx - bg.get_width() // 2, cy - bg.get_height() // 2))
+            txt.set_alpha(int(255 * alpha))
+            surf.blit(txt, (cx - txt.get_width() // 2, cy - txt.get_height() // 2))
+
         if j.mort:
             self.hud.dessiner_game_over(surf, j, temps)
 
@@ -394,7 +564,7 @@ def main():
     en_cours = True
 
     while en_cours:
-        dt = min(horloge.tick(60) / 1000.0, 0.05)    # évite les gros sauts après un lag
+        dt = min(horloge.tick(60) / 1000.0, 0.05)
         temps = pygame.time.get_ticks() / 1000.0
 
         for event in pygame.event.get():
@@ -404,8 +574,10 @@ def main():
                 jeu.regarder(*event.rel)
             elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                 jeu.tirer()
+            elif event.type == pygame.KEYDOWN and event.key == pygame.K_f:
+                jeu.interagir_coffre()
             elif event.type == pygame.KEYDOWN and event.key == pygame.K_r:
-                jeu.recharger()             # R : recharger (ou rejouer si on est mort)
+                jeu.recharger()
             elif event.type == pygame.KEYDOWN and event.key == pygame.K_RETURN and jeu.joueur.mort:
                 jeu.recharger()
 

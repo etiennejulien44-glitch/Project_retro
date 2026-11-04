@@ -1,17 +1,20 @@
 # entity.py  --  joueur, ennemis (IA), projectiles, butin, tir
 import math
 import random
+import time
 import numpy as np
 import config
 from terrain import get_hauteur_sol, monstres_caches
 from renderer import projeter_3d_masse
 
-projectiles = []   # chaque projectile : [x, y, z, vx, vy, vz, duree_restante]
-pickups = []       # chaque butin      : [x, z, type]   (0 = munitions, 1 = soin)
+projectiles = []
+pickups = []       # [x, z, type, spawn_time]   type 0=mun, 1=soin
+
+DELAI_RAMASSAGE = 0.6   # secondes avant qu'un pickup puisse être ramassé
 
 
 # ---------------------------------------------------------------------------
-# Joueur : PV + munitions limitées
+# Joueur
 # ---------------------------------------------------------------------------
 class Joueur:
     def __init__(self):
@@ -21,17 +24,16 @@ class Joueur:
         self.pv = config.JOUEUR_PV_MAX
         self.chargeur = config.CHARGEUR_TAILLE
         self.reserve = config.MUNITIONS_RESERVE_DEPART
-        self.t_recharge = 0.0      # > 0 : rechargement en cours
+        self.t_recharge = 0.0
         self.t_cadence = 0.0
         self.flash_degats = 0.0
-        self.t_hit = 0.0           # marqueur "touché"
-        self.t_kill = 0.0          # marqueur "tué"
+        self.t_hit = 0.0
+        self.t_kill = 0.0
         self.message = ""
         self.t_message = 0.0
         self.kills = 0
         self.mort = False
 
-    # --- état ---
     def progression_recharge(self):
         if self.t_recharge <= 0:
             return 0.0
@@ -41,7 +43,6 @@ class Joueur:
         self.message = texte
         self.t_message = duree
 
-    # --- santé ---
     def prendre_degats(self, n):
         if self.mort:
             return
@@ -54,7 +55,6 @@ class Joueur:
     def soigner(self, n):
         self.pv = min(config.JOUEUR_PV_MAX, self.pv + n)
 
-    # --- munitions ---
     def ajouter_munitions(self, n):
         self.reserve = min(config.MUNITIONS_RESERVE_MAX, self.reserve + n)
 
@@ -66,7 +66,6 @@ class Joueur:
         return True
 
     def tenter_tir(self):
-        """Consomme une balle si possible. Retourne True si le tir part."""
         if self.mort or self.t_recharge > 0 or self.t_cadence > 0:
             return False
         if self.chargeur <= 0:
@@ -78,7 +77,7 @@ class Joueur:
         self.chargeur -= 1
         self.t_cadence = config.CADENCE_TIR
         if self.chargeur == 0 and self.reserve > 0:
-            self.lancer_recharge()          # rechargement automatique
+            self.lancer_recharge()
         return True
 
     def mettre_a_jour(self, dt):
@@ -102,7 +101,7 @@ def reinitialiser_entites():
 
 
 # ---------------------------------------------------------------------------
-# Ligne de vue : le terrain bloque les tirs
+# Ligne de vue
 # ---------------------------------------------------------------------------
 def ligne_de_vue(x0, y0, z0, x1, y1, z1, n=14):
     t = np.linspace(0.05, 0.95, n)
@@ -110,18 +109,19 @@ def ligne_de_vue(x0, y0, z0, x1, y1, z1, n=14):
     zs = z0 + (z1 - z0) * t
     ys = y0 + (y1 - y0) * t
     sol = get_hauteur_sol(xs, zs)
-    return not np.any(ys > sol - 3)        # y vers le bas : ys > sol = sous le sol
+    return not np.any(ys > sol - 3)
 
 
 # ---------------------------------------------------------------------------
-# Butin
+# Butin (drops de monstres)
 # ---------------------------------------------------------------------------
 def deposer_butin(x, z):
     r = random.random()
+    t = time.time()
     if r < config.DROP_MUNITIONS:
-        pickups.append([x, z, 0])
+        pickups.append([x, z, 0, t])
     elif r < config.DROP_MUNITIONS + config.DROP_SOIN:
-        pickups.append([x, z, 1])
+        pickups.append([x, z, 1, t])
     if len(pickups) > 80:
         pickups.pop(0)
 
@@ -129,8 +129,12 @@ def deposer_butin(x, z):
 def mettre_a_jour_pickups(joueur):
     if joueur.mort:
         return
+    now = time.time()
     restants = []
     for p in pickups:
+        if now - p[3] < DELAI_RAMASSAGE:
+            restants.append(p)      # période de grâce (visibilité)
+            continue
         proche = math.hypot(p[0] - config.cam_x, p[1] - config.cam_z) < config.RAYON_RAMASSAGE
         if proche and p[2] == 0:
             joueur.ajouter_munitions(config.PACK_MUNITIONS)
@@ -144,7 +148,7 @@ def mettre_a_jour_pickups(joueur):
 
 
 # ---------------------------------------------------------------------------
-# IA des ennemis
+# IA ennemis
 # ---------------------------------------------------------------------------
 def _hauteur_centre(m):
     return get_hauteur_sol(m.x, m.z) + (-15 if m.tipo == 0 else -65)
@@ -158,19 +162,19 @@ def mettre_a_jour_monstres(dt, cles, joueur, temps):
             dx, dz = cx - m.x, cz - m.z
             d = math.hypot(dx, dz)
 
-            if m.tipo == 0:                       # ---- ARAIGNEE : corps à corps ----
+            if m.tipo == 0:
                 if d >= config.ARAIGNEE_AGGRO:
                     continue
                 if d > config.ARAIGNEE_PORTEE:
                     m.x += dx / d * config.ARAIGNEE_VITESSE * dt
                     m.z += dz / d * config.ARAIGNEE_VITESSE * dt
-                    m.cd = max(m.cd, 0.4)          # petit temps de "préparation" avant de mordre
+                    m.cd = max(m.cd, 0.4)
                 else:
                     m.cd -= dt
                     if m.cd <= 0:
                         joueur.prendre_degats(config.ARAIGNEE_DEGATS)
                         m.cd = config.ARAIGNEE_COOLDOWN
-            else:                                  # ---- DRONE : distance + tirs ----
+            else:
                 if d >= config.DRONE_AGGRO or d < 1e-6:
                     continue
                 v = config.DRONE_VITESSE * dt
@@ -180,7 +184,7 @@ def mettre_a_jour_monstres(dt, cles, joueur, temps):
                 elif d < config.DRONE_DIST_PREF - 150:
                     m.x -= dx / d * v
                     m.z -= dz / d * v
-                lat = math.sin(temps * 0.8 + m.phase) * v * 0.7     # déplacement latéral
+                lat = math.sin(temps * 0.8 + m.phase) * v * 0.7
                 m.x += -dz / d * lat
                 m.z += dx / d * lat
 
@@ -207,7 +211,7 @@ def mettre_a_jour_projectiles(dt, joueur):
         p[2] += p[5] * dt
         p[6] -= dt
         if p[6] <= 0 or p[1] > get_hauteur_sol(p[0], p[2]):
-            continue                                   # expiré ou enfoui dans le sol
+            continue
         dx, dy, dz = p[0] - config.cam_x, p[1] - config.cam_y, p[2] - config.cam_z
         if dx * dx + dy * dy + dz * dz < r2:
             joueur.prendre_degats(config.PROJECTILE_DEGATS)
@@ -217,10 +221,9 @@ def mettre_a_jour_projectiles(dt, joueur):
 
 
 # ---------------------------------------------------------------------------
-# Tir du joueur (hitscan au centre de l'écran)
+# Tir joueur
 # ---------------------------------------------------------------------------
 def tirer_laser(cles, joueur):
-    """Retourne (pos_ecran_impact | None, touche, tue)."""
     mons = [m for cle in cles for m in monstres_caches[cle]]
     if not mons:
         return None, False, False
@@ -229,7 +232,7 @@ def tirer_laser(cles, joueur):
     ex, ey, rz, v = projeter_3d_masse(pos)
     cx, cy = config.LARGEUR // 2, config.HAUTEUR // 2
     dist = np.hypot(ex - cx, ey - cy)
-    rayon = np.maximum(22.0, 30.0 * config.FOCALE / np.maximum(rz, 1.0))   # hitbox qui grossit de près
+    rayon = np.maximum(22.0, 30.0 * config.FOCALE / np.maximum(rz, 1.0))
     candidats = np.nonzero(v & (dist < rayon) & (rz < config.PORTEE_TIR))[0]
 
     for i in sorted(candidats.tolist(), key=lambda k: rz[k]):

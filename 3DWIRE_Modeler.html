@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Studio Wireframe 3D - Modélisateur Complet</title>
+  
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+
+  <style>
+    body { margin: 0; background-color: #0f172a; color: #f8fafc; font-family: ui-sans-serif, system-ui, sans-serif; height: 100vh; overflow: hidden; }
+    #canvas-container { width: 100%; height: 100%; position: relative; }
+    canvas { width: 100%; height: 100%; display: block; }
+    ::-webkit-scrollbar { width: 5px; }
+    ::-webkit-scrollbar-track { background: #1e293b; }
+    ::-webkit-scrollbar-thumb { background: #475569; border-radius: 3px; }
+  </style>
+</head>
+<body class="flex flex-col h-screen overflow-hidden bg-slate-900 text-slate-100">
+
+  <!-- Header -->
+  <header class="h-14 bg-slate-800 border-b border-slate-700 flex items-center justify-between px-4 z-10 shrink-0">
+    <div class="flex items-center gap-3">
+      <div class="p-2 bg-indigo-600 rounded-lg text-white">
+        <i class="fa-solid fa-cubes"></i>
+      </div>
+      <div>
+        <h1 class="font-bold text-sm leading-none">Studio Wireframe 3D</h1>
+        <p class="text-xs text-slate-400">Éditeur de sommets, formes et segments libres</p>
+      </div>
+    </div>
+
+    <!-- Actions Undo / Redo -->
+    <div class="flex items-center gap-2">
+      <button onclick="undo()" class="px-2.5 py-1 text-xs bg-slate-700 hover:bg-slate-600 text-slate-200 rounded border border-slate-600 transition flex items-center gap-1">
+        <i class="fa-solid fa-rotate-left"></i> Annuler (Ctrl+Z)
+      </button>
+      <button onclick="redo()" class="px-2.5 py-1 text-xs bg-slate-700 hover:bg-slate-600 text-slate-200 rounded border border-slate-600 transition flex items-center gap-1">
+        <i class="fa-solid fa-rotate-right"></i> Rétablir (Ctrl+Y)
+      </button>
+      <div class="h-4 w-[1px] bg-slate-700 mx-1"></div>
+      <button onclick="resetCamera()" class="px-3 py-1 text-xs bg-slate-700 hover:bg-slate-600 text-white rounded font-medium transition flex items-center gap-1.5">
+        <i class="fa-solid fa-crosshairs"></i> Vue
+      </button>
+      <button onclick="copyPythonCode()" class="px-3 py-1 text-xs bg-emerald-600 hover:bg-emerald-500 text-white rounded font-medium transition flex items-center gap-1.5">
+        <i class="fa-solid fa-copy"></i> Copier Python
+      </button>
+    </div>
+  </header>
+
+  <!-- Main Content -->
+  <div class="flex flex-1 overflow-hidden">
+    
+    <!-- Left Panel -->
+    <aside class="w-80 bg-slate-800 border-r border-slate-700 flex flex-col shrink-0 p-4 space-y-4 overflow-y-auto">
+      
+      <!-- 1. Ajouter Formes -->
+      <div>
+        <h2 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">1. Formes Primitives</h2>
+        <div class="grid grid-cols-2 gap-2">
+          <button onclick="addObject('cube')" class="p-2 bg-slate-750 hover:bg-slate-700 border border-slate-650 rounded text-left transition">
+            <div class="text-xs font-bold text-indigo-400"><i class="fa-solid fa-cube mr-1"></i> Cube / Pavé</div>
+          </button>
+          <button onclick="addObject('pyramid')" class="p-2 bg-slate-750 hover:bg-slate-700 border border-slate-650 rounded text-left transition">
+            <div class="text-xs font-bold text-indigo-400"><i class="fa-solid fa-pyramid mr-1"></i> Pyramide</div>
+          </button>
+        </div>
+      </div>
+
+      <!-- 2. Relier deux points avec PREVIEW ORANGE -->
+      <div class="pt-3 border-t border-slate-700 space-y-2 bg-amber-950/20 p-2.5 rounded border border-amber-500/30">
+        <div class="flex items-center justify-between">
+          <h2 class="text-xs font-bold text-amber-400 uppercase tracking-wider">2. Relier Deux Points</h2>
+          <span class="text-[10px] text-amber-300 font-medium px-1.5 py-0.5 bg-amber-500/20 rounded">Preview Orange</span>
+        </div>
+        
+        <div class="space-y-1">
+          <span class="text-[10px] text-slate-300 font-semibold">Point P1 (X, Y, Z)</span>
+          <div class="grid grid-cols-3 gap-1">
+            <input type="number" id="link-p1x" value="10" oninput="updatePreview()" class="bg-slate-900 border border-slate-700 rounded px-1.5 py-1 text-xs">
+            <input type="number" id="link-p1y" value="0" oninput="updatePreview()" class="bg-slate-900 border border-slate-700 rounded px-1.5 py-1 text-xs">
+            <input type="number" id="link-p1z" value="10" oninput="updatePreview()" class="bg-slate-900 border border-slate-700 rounded px-1.5 py-1 text-xs">
+          </div>
+        </div>
+
+        <div class="space-y-1">
+          <span class="text-[10px] text-slate-300 font-semibold">Point P2 (X, Y, Z)</span>
+          <div class="grid grid-cols-3 gap-1">
+            <input type="number" id="link-p2x" value="-10" oninput="updatePreview()" class="bg-slate-900 border border-slate-700 rounded px-1.5 py-1 text-xs">
+            <input type="number" id="link-p2y" value="20" oninput="updatePreview()" class="bg-slate-900 border border-slate-700 rounded px-1.5 py-1 text-xs">
+            <input type="number" id="link-p2z" value="10" oninput="updatePreview()" class="bg-slate-900 border border-slate-700 rounded px-1.5 py-1 text-xs">
+          </div>
+        </div>
+
+        <button onclick="addCustomSegment()" class="w-full py-2 bg-amber-600 hover:bg-amber-500 text-white text-xs rounded transition font-bold shadow flex items-center justify-center gap-1.5 mt-2">
+          <i class="fa-solid fa-link"></i> Valider et Tracer ce Segment
+        </button>
+      </div>
+
+      <!-- 3. ÉDITION DE L'OBJET -->
+      <div id="transform-panel" class="pt-3 border-t border-slate-700 space-y-3 hidden">
+        <div class="flex justify-between items-center">
+          <h2 class="text-xs font-bold text-indigo-400 uppercase tracking-wider">Édition de l'Objet</h2>
+          <button onclick="deleteSelectedObject()" class="text-rose-400 hover:text-rose-300 text-xs p-1">
+            <i class="fa-solid fa-trash"></i> Supprimer
+          </button>
+        </div>
+
+        <!-- Position -->
+        <div class="space-y-1">
+          <span class="text-[11px] font-medium text-slate-300">Position (X, Y, Z)</span>
+          <div class="grid grid-cols-3 gap-1">
+            <input type="number" id="pos-x" onchange="saveHistory(); updateObjectTransform()" class="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs">
+            <input type="number" id="pos-y" onchange="saveHistory(); updateObjectTransform()" class="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs">
+            <input type="number" id="pos-z" onchange="saveHistory(); updateObjectTransform()" class="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs">
+          </div>
+        </div>
+
+        <!-- Angles de Rotation -->
+        <div class="space-y-1">
+          <span class="text-[11px] font-medium text-amber-400"><i class="fa-solid fa-rotate mr-1"></i> Rotation (Rx, Ry, Rz)</span>
+          <div class="grid grid-cols-3 gap-1">
+            <input type="number" id="rot-x" placeholder="Rx" onchange="saveHistory(); updateObjectTransform()" class="bg-slate-900 border border-amber-600/50 rounded px-2 py-1 text-xs">
+            <input type="number" id="rot-y" placeholder="Ry" onchange="saveHistory(); updateObjectTransform()" class="bg-slate-900 border border-amber-600/50 rounded px-2 py-1 text-xs">
+            <input type="number" id="rot-z" placeholder="Rz" onchange="saveHistory(); updateObjectTransform()" class="bg-slate-900 border border-amber-600/50 rounded px-2 py-1 text-xs">
+          </div>
+        </div>
+      </div>
+
+      <div class="pt-3 border-t border-slate-700">
+        <button onclick="clearAllObjects()" class="w-full py-1.5 bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 border border-rose-800/40 text-xs rounded transition">
+          <i class="fa-solid fa-trash mr-1"></i> Tout effacer
+        </button>
+      </div>
+
+    </aside>
+
+    <!-- Center 3D Viewport -->
+    <main class="flex-1 relative bg-slate-950">
+      <div id="canvas-container"></div>
+
+      <div class="absolute bottom-4 left-4 bg-slate-900/80 backdrop-blur border border-slate-700 rounded-lg p-2.5 text-[11px] text-slate-400 space-y-1 pointer-events-none">
+        <div><span class="text-amber-400 font-semibold">Ligne Orange Pointillée :</span> Prévisualisation du segment libre.</div>
+        <div><span class="text-indigo-400 font-semibold">Raccourcis :</span> Ctrl + Z (Annuler) | Ctrl + Y (Rétablir)</div>
+      </div>
+    </main>
+
+    <!-- Right Panel -->
+    <aside class="w-80 bg-slate-800 border-l border-slate-700 flex flex-col shrink-0">
+      
+      <div class="p-3 border-b border-slate-700">
+        <h2 class="text-xs font-bold text-slate-300 uppercase tracking-wider">
+          Éléments (<span id="object-count" class="text-indigo-400">0</span>)
+        </h2>
+      </div>
+
+      <!-- Liste Objets -->
+      <div id="objects-list" class="h-40 overflow-y-auto p-2 space-y-1 text-xs border-b border-slate-700"></div>
+
+      <!-- Édition des Sommets -->
+      <div id="vertex-list-panel" class="flex-1 bg-slate-850 p-3 overflow-y-auto hidden border-b border-slate-700">
+        <div class="text-xs font-bold text-amber-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+          <i class="fa-solid fa-vector-square"></i> Édition des Sommets (Points)
+        </div>
+        <div id="vertices-container" class="space-y-1.5 text-xs"></div>
+      </div>
+
+      <!-- Code Output Python -->
+      <div class="h-48 bg-slate-900 p-3 flex flex-col">
+        <div class="flex justify-between items-center mb-1">
+          <span class="text-[11px] font-bold text-slate-400 uppercase">Code Python Généré</span>
+          <span class="text-[10px] text-slate-500" id="total-segments-count">0 segments</span>
+        </div>
+        <textarea id="python-output" readonly class="w-full flex-1 bg-slate-950 text-emerald-400 font-mono text-[10px] p-2 rounded border border-slate-800 resize-none focus:outline-none"></textarea>
+      </div>
+
+    </aside>
+
+  </div>
+
+  <script>
+    let objects = [];
+    let selectedObjId = null;
+
+    let historyStack = [];
+    let historyIndex = -1;
+
+    function saveHistory() {
+      historyStack = historyStack.slice(0, historyIndex + 1);
+      historyStack.push(JSON.stringify(objects));
+      historyIndex++;
+    }
+
+    function undo() {
+      if (historyIndex > 0) {
+        historyIndex--;
+        objects = JSON.parse(historyStack[historyIndex]);
+        renderAll();
+      }
+    }
+
+    function redo() {
+      if (historyIndex < historyStack.length - 1) {
+        historyIndex++;
+        objects = JSON.parse(historyStack[historyIndex]);
+        renderAll();
+      }
+    }
+
+    window.addEventListener('keydown', (e) => {
+      if (e.ctrlKey && e.key.toLowerCase() === 'z') { e.preventDefault(); undo(); }
+      if (e.ctrlKey && e.key.toLowerCase() === 'y') { e.preventDefault(); redo(); }
+    });
+
+    const container = document.getElementById('canvas-container');
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x0f172a);
+
+    const camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 1000);
+    camera.position.set(60, 40, 80);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(container.clientWidth, container.clientHeight);
+    renderer.setPixelRatio(window.devicePixelRatio);
+    container.appendChild(renderer.domElement);
+
+    const controls = new THREE.OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.05;
+
+    scene.add(new THREE.GridHelper(100, 20, 0x475569, 0x334155));
+    scene.add(new THREE.AxesHelper(20));
+
+    const mainGroup = new THREE.Group();
+    scene.add(mainGroup);
+
+    const previewGroup = new THREE.Group();
+    scene.add(previewGroup);
+
+    function getBoxGeometry(w=20, h=20, d=20) {
+      const hw=w/2, hh=h/2, hd=d/2;
+      return {
+        verts: [[-hw,-hh,-hd],[hw,-hh,-hd],[hw,hh,-hd],[-hw,hh,-hd],[-hw,-hh,hd],[hw,-hh,hd],[hw,hh,hd],[-hw,hh,hd]],
+        edges: [[0,1],[1,2],[2,3],[3,0],[4,5],[5,6],[6,7],[7,4],[0,4],[1,5],[2,6],[3,7]]
+      };
+    }
+
+    function addObject(type) {
+      const id = Date.now();
+      const geom = getBoxGeometry();
+      const newObj = {
+        id: id,
+        name: `${type.toUpperCase()}_${objects.length + 1}`,
+        type: type,
+        posX: 0, posY: 20, posZ: 0,
+        rotX: 0, rotY: 0, rotZ: 0,
+        vertices: geom.verts,
+        edges: geom.edges
+      };
+      objects.push(newObj);
+      selectedObjId = id;
+      saveHistory();
+      renderAll();
+    }
+
+    function addCustomSegment() {
+      const p1 = [
+        parseInt(document.getElementById('link-p1x').value) || 0,
+        parseInt(document.getElementById('link-p1y').value) || 0,
+        parseInt(document.getElementById('link-p1z').value) || 0
+      ];
+      const p2 = [
+        parseInt(document.getElementById('link-p2x').value) || 0,
+        parseInt(document.getElementById('link-p2y').value) || 0,
+        parseInt(document.getElementById('link-p2z').value) || 0
+      ];
+
+      const newObj = {
+        id: Date.now(),
+        name: `SEGMENT_${objects.length + 1}`,
+        type: 'segment',
+        posX: 0, posY: 0, posZ: 0,
+        rotX: 0, rotY: 0, rotZ: 0,
+        vertices: [p1, p2],
+        edges: [[0, 1]]
+      };
+      objects.push(newObj);
+      selectedObjId = newObj.id;
+      saveHistory();
+      renderAll();
+    }
+
+    function updatePreview() {
+      while(previewGroup.children.length > 0) previewGroup.remove(previewGroup.children[0]);
+
+      const p1 = [
+        parseInt(document.getElementById('link-p1x').value) || 0,
+        parseInt(document.getElementById('link-p1y').value) || 0,
+        parseInt(document.getElementById('link-p1z').value) || 0
+      ];
+      const p2 = [
+        parseInt(document.getElementById('link-p2x').value) || 0,
+        parseInt(document.getElementById('link-p2y').value) || 0,
+        parseInt(document.getElementById('link-p2z').value) || 0
+      ];
+
+      const points = [new THREE.Vector3(...p1), new THREE.Vector3(...p2)];
+      const geom = new THREE.BufferGeometry().setFromPoints(points);
+      const mat = new THREE.LineDashedMaterial({ color: 0xf59e0b, dashSize: 2, gapSize: 1, linewidth: 3 });
+      const line = new THREE.Line(geom, mat);
+      line.computeLineDistances();
+      previewGroup.add(line);
+
+      const sphereMat = new THREE.MeshBasicMaterial({ color: 0xf59e0b });
+      [p1, p2].forEach(pt => {
+        const sphereGeo = new THREE.SphereGeometry(1.5, 8, 8);
+        const sphere = new THREE.Mesh(sphereGeo, sphereMat);
+        sphere.position.set(...pt);
+        previewGroup.add(sphere);
+      });
+    }
+
+    function transformPoint(pt, obj) {
+      if (obj.type === 'segment') {
+        // Les segments libres gardent leurs coordonnées exactes sans transformation d'objet
+        return [pt[0], pt[1], pt[2]];
+      }
+
+      let v = new THREE.Vector3(pt[0], pt[1], pt[2]);
+      const euler = new THREE.Euler(
+        THREE.MathUtils.degToRad(obj.rotX || 0),
+        THREE.MathUtils.degToRad(obj.rotY || 0),
+        THREE.MathUtils.degToRad(obj.rotZ || 0),
+        'XYZ'
+      );
+      v.applyEuler(euler);
+      v.x += obj.posX;
+      v.y += obj.posY;
+      v.z += obj.posZ;
+      return [v.x, v.y, v.z];
+    }
+
+    function renderAll() {
+      while(mainGroup.children.length > 0) mainGroup.remove(mainGroup.children[0]);
+
+      let allPythonSegments = [];
+
+      objects.forEach(obj => {
+        const isSelected = (obj.id === selectedObjId);
+        const mat = new THREE.LineBasicMaterial({
+          color: isSelected ? 0x38bdf8 : 0x94a3b8,
+          linewidth: isSelected ? 3 : 1
+        });
+
+        const transformedVerts = obj.vertices.map(v => transformPoint(v, obj));
+
+        obj.edges.forEach(edge => {
+          const p1 = transformedVerts[edge[0]];
+          const p2 = transformedVerts[edge[1]];
+
+          // Export Python (Inversion Y automatique)
+          const pyP1 = [Math.round(p1[0]), Math.round(-p1[1]), Math.round(p1[2])];
+          const pyP2 = [Math.round(p2[0]), Math.round(-p2[1]), Math.round(p2[2])];
+          allPythonSegments.push([pyP1, pyP2]);
+
+          const points = [new THREE.Vector3(...p1), new THREE.Vector3(...p2)];
+          const geom = new THREE.BufferGeometry().setFromPoints(points);
+          const line = new THREE.Line(geom, mat);
+          mainGroup.add(line);
+        });
+
+        if(isSelected && obj.type !== 'segment') {
+          transformedVerts.forEach(pt => {
+            const sphereGeo = new THREE.SphereGeometry(1.5, 8, 8);
+            const sphereMat = new THREE.MeshBasicMaterial({ color: 0xf59e0b });
+            const sphere = new THREE.Mesh(sphereGeo, sphereMat);
+            sphere.position.set(...pt);
+            mainGroup.add(sphere);
+          });
+        }
+      });
+
+      updateUI(allPythonSegments);
+      updatePreview();
+    }
+
+    function updateUI(segments) {
+      document.getElementById('object-count').innerText = objects.length;
+      document.getElementById('total-segments-count').innerText = `${segments.length} segments`;
+
+      const listEl = document.getElementById('objects-list');
+      listEl.innerHTML = '';
+      objects.forEach(obj => {
+        const isSelected = (obj.id === selectedObjId);
+        const item = document.createElement('div');
+        item.className = `p-2 rounded border flex justify-between items-center cursor-pointer transition ${isSelected ? 'bg-indigo-900/40 border-indigo-500 text-indigo-300' : 'bg-slate-750 border-slate-700 text-slate-300 hover:bg-slate-700'}`;
+        item.onclick = () => selectObject(obj.id);
+        item.innerHTML = `
+          <span class="font-bold"><i class="fa-solid fa-cube mr-1"></i> ${obj.name}</span>
+          <button onclick="event.stopPropagation(); deleteObject(${obj.id})" class="text-slate-500 hover:text-rose-400 p-1">
+            <i class="fa-solid fa-trash"></i>
+          </button>
+        `;
+        listEl.appendChild(item);
+      });
+
+      const transPanel = document.getElementById('transform-panel');
+      const vertPanel = document.getElementById('vertex-list-panel');
+      const selectedObj = objects.find(o => o.id === selectedObjId);
+
+      if(selectedObj && selectedObj.type !== 'segment') {
+        transPanel.classList.remove('hidden');
+        vertPanel.classList.remove('hidden');
+        document.getElementById('pos-x').value = selectedObj.posX;
+        document.getElementById('pos-y').value = selectedObj.posY;
+        document.getElementById('pos-z').value = selectedObj.posZ;
+        document.getElementById('rot-x').value = selectedObj.rotX || 0;
+        document.getElementById('rot-y').value = selectedObj.rotY || 0;
+        document.getElementById('rot-z').value = selectedObj.rotZ || 0;
+
+        const vertContainer = document.getElementById('vertices-container');
+        vertContainer.innerHTML = '';
+        selectedObj.vertices.forEach((v, idx) => {
+          const vDiv = document.createElement('div');
+          vDiv.className = "flex items-center gap-1.5 bg-slate-900 p-1.5 rounded border border-slate-750";
+          vDiv.innerHTML = `
+            <span class="w-8 text-amber-400 font-bold font-mono">P${idx}:</span>
+            <input type="number" value="${v[0]}" onchange="updateVertex(${idx}, 0, this.value)" class="w-16 bg-slate-950 border border-slate-700 rounded px-1 py-0.5 text-center font-mono">
+            <input type="number" value="${v[1]}" onchange="updateVertex(${idx}, 1, this.value)" class="w-16 bg-slate-950 border border-slate-700 rounded px-1 py-0.5 text-center font-mono">
+            <input type="number" value="${v[2]}" onchange="updateVertex(${idx}, 2, this.value)" class="w-16 bg-slate-950 border border-slate-700 rounded px-1 py-0.5 text-center font-mono">
+          `;
+          vertContainer.appendChild(vDiv);
+        });
+      } else {
+        transPanel.classList.add('hidden');
+        vertPanel.classList.add('hidden');
+      }
+
+      let pyCode = "MODELE_CUSTOM = [\n";
+      segments.forEach(s => {
+        pyCode += `    ((${s[0][0]}, ${s[0][1]}, ${s[0][2]}), (${s[1][0]}, ${s[1][1]}, ${s[1][2]})),\n`;
+      });
+      pyCode += "]";
+      document.getElementById('python-output').value = pyCode;
+    }
+
+    function selectObject(id) {
+      selectedObjId = id;
+      renderAll();
+    }
+
+    function updateObjectTransform() {
+      const obj = objects.find(o => o.id === selectedObjId);
+      if(!obj) return;
+      obj.posX = parseInt(document.getElementById('pos-x').value) || 0;
+      obj.posY = parseInt(document.getElementById('pos-y').value) || 0;
+      obj.posZ = parseInt(document.getElementById('pos-z').value) || 0;
+      obj.rotX = parseInt(document.getElementById('rot-x').value) || 0;
+      obj.rotY = parseInt(document.getElementById('rot-y').value) || 0;
+      obj.rotZ = parseInt(document.getElementById('rot-z').value) || 0;
+      renderAll();
+    }
+
+    function updateVertex(vIdx, axisIdx, val) {
+      const obj = objects.find(o => o.id === selectedObjId);
+      if(!obj) return;
+      obj.vertices[vIdx][axisIdx] = parseInt(val) || 0;
+      saveHistory();
+      renderAll();
+    }
+
+    function deleteObject(id) {
+      objects = objects.filter(o => o.id !== id);
+      if(selectedObjId === id) selectedObjId = null;
+      saveHistory();
+      renderAll();
+    }
+
+    function deleteSelectedObject() {
+      if(selectedObjId) deleteObject(selectedObjId);
+    }
+
+    function clearAllObjects() {
+      objects = [];
+      selectedObjId = null;
+      saveHistory();
+      renderAll();
+    }
+
+    function resetCamera() {
+      camera.position.set(60, 40, 80);
+      controls.target.set(0, 20, 0);
+      controls.update();
+    }
+
+    function copyPythonCode() {
+      const codeText = document.getElementById('python-output').value;
+      navigator.clipboard.writeText(codeText).then(() => alert("Code Python copié !"));
+    }
+
+    addObject('cube');
+    animate();
+
+    window.addEventListener('resize', () => {
+      camera.aspect = container.clientWidth / container.clientHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(container.clientWidth, container.clientHeight);
+    });
+
+    function animate() {
+      requestAnimationFrame(animate);
+      controls.update();
+      renderer.render(scene, camera);
+    }
+  </script>
+</body>
+</html>
