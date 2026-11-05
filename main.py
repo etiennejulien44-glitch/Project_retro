@@ -1,47 +1,61 @@
 # game_test.py  --  FPS rétro synthwave
 import math
 import sys
-import time
 from itertools import repeat
 from operator import itemgetter
 
 import numpy as np
 import pygame
 
-import config
-import entity
-import boosts
-from boosts import StatsBoostes
-from entity import Joueur
-from renderer import (vers_camera, ecran_depuis_camera, projeter_3d_masse,
-                      clipper_near, transformer_vertices_monde)
-from terrain import (get_hauteur_sol, get_zone, reinitialiser_monde,
-                     monstres_caches, chest_caches)
-from modeles import (MODELE_ARBRE, MODELE_ARAIGNEE, MODELE_DRONE,
-                     MODELE_MUNITIONS, MODELE_SOINS,
-                     MODELE_CHEST, PRISMATIC_CHEST)
-from ciel import Ciel
-from hud import HUD, MUZZLE, CYAN, BLANC
+# Fichiers situés dans le dossier 'data'
+from data import config, boosts, modeles
+from data.boosts import StatsBoostes, Butin, TypeBoost, Rarete
+from data.modeles import (
+    MODELE_ARBRE, MODELE_ARAIGNEE, MODELE_DRONE,
+    MODELE_MUNITIONS, MODELE_SOINS,
+    MODELE_CHEST, PRISMATIC_CHEST, SPIDER_BOSS
+)
 
+# Fichiers situés dans le dossier 'world'
+from world import entity, ciel, terrain
+from world.entity import Joueur
+from world.ciel import Ciel
+from world import boss as boss_module
+from world.terrain import (
+    get_hauteur_sol, get_zone, reinitialiser_monde,
+    monstres_caches, chest_caches
+)
+
+# Fichiers situés dans le dossier 'engine'
+from engine.renderer import (
+    vers_camera, ecran_depuis_camera, projeter_3d_masse,
+    clipper_near, transformer_vertices_monde
+)
+
+# Fichiers situés dans le dossier 'ui'
+from ui.hud import HUD, MUZZLE, CYAN, BLANC
+from ui.terminal import TerminalInventory
 
 # ---------------------------------------------------------------------------
-# Échelles globales
+# Échelles / rendu
 # ---------------------------------------------------------------------------
-ECHELLE_ARBRE    = 1.0
-ECHELLE_ARAIGNEE = 1.0
-ECHELLE_DRONE    = 1.0
-ECHELLE_PICKUP   = 3.0        # ← plus visible
-ECHELLE_CHEST    = 1.0
-ECHELLE_BUTIN    = 22.0       # ← pyramides plus grosses
+ECHELLE_ARBRE     = 4.0
+ECHELLE_ARAIGNEE  = 1.0
+ECHELLE_DRONE     = 1.0
+ECHELLE_PICKUP    = 3.0
+ECHELLE_CHEST     = 1.0
+ECHELLE_BUTIN     = 200.0
+ECHELLE_BOSS      = 4.0
+
+BOSS_YAW_OFFSET   = 0.0
+DEBUG_STATS       = True   # F3 pour toggle
 
 DISTANCE_INTERACTION_COFFRE = 160
-
 
 def _aplatir_modele(modele, echelle=1.0):
     P1 = np.array([l[0] for l in modele], dtype=np.float32) * echelle
     P2 = np.array([l[1] for l in modele], dtype=np.float32) * echelle
     return P1, P2
-
 
 ARBRE_P1,    ARBRE_P2    = _aplatir_modele(MODELE_ARBRE,    ECHELLE_ARBRE)
 ARAIGNEE_P1, ARAIGNEE_P2 = _aplatir_modele(MODELE_ARAIGNEE, ECHELLE_ARAIGNEE)
@@ -51,7 +65,7 @@ SOIN_P1,     SOIN_P2     = _aplatir_modele(MODELE_SOINS,    ECHELLE_PICKUP)
 CHEST_P1,    CHEST_P2    = _aplatir_modele(MODELE_CHEST,      ECHELLE_CHEST)
 PRISMA_P1,   PRISMA_P2   = _aplatir_modele(PRISMATIC_CHEST,   ECHELLE_CHEST)
 PYR_P1,      PYR_P2      = _aplatir_modele(boosts.MODELE_PYRAMIDE, ECHELLE_BUTIN)
-
+BOSS_P1,     BOSS_P2     = _aplatir_modele(SPIDER_BOSS,      ECHELLE_BOSS)
 
 COULEUR_TRONC = (120, 70, 255)
 COULEUR_FEUILLES = (40, 240, 255)
@@ -64,7 +78,6 @@ COULEUR_TOUCHE = (255, 255, 255)
 COULEUR_CHEST = (255, 210, 90)
 COULEUR_CHEST_OUVERT = (255, 255, 255)
 
-
 def _build_fog_lut():
     r0, g0, b0 = config.TERRAIN_PROCHE
     r1, g1, b1 = config.TERRAIN_LOIN
@@ -72,7 +85,6 @@ def _build_fog_lut():
     return [(int(r0 + (r1 - r0) * i / n),
              int(g0 + (g1 - g0) * i / n),
              int(b0 + (b1 - b0) * i / n)) for i in range(config.FOG_STEPS)]
-
 
 FOG_LUT = _build_fog_lut()
 FOG_MAX_INV = config.FOG_STEPS / config.DIST_AFFICHAGE_MAX
@@ -83,7 +95,6 @@ BIAIS_ENTITES = 150
 
 _GLOW = {}
 
-
 def glow_de(c):
     g = _GLOW.get(c)
     if g is None:
@@ -91,11 +102,9 @@ def glow_de(c):
         _GLOW[c] = g
     return g
 
-
 def _couleur_fog(profondeur):
     i = int(profondeur * FOG_MAX_INV)
     return FOG_LUT[i if i < config.FOG_STEPS - 1 else config.FOG_STEPS - 1]
-
 
 def _tourner_y(P, a):
     c, s = math.cos(a), math.sin(a)
@@ -103,7 +112,6 @@ def _tourner_y(P, a):
     out[:, 0] = P[:, 0] * c + P[:, 2] * s
     out[:, 2] = -P[:, 0] * s + P[:, 2] * c
     return out
-
 
 # ---------------------------------------------------------------------------
 # Terrain
@@ -119,6 +127,9 @@ def collecter_terrain(zone, items):
     tous_proches = nA & nB & nC & nD
     tous_loin_ok = loin_ok[A] & loin_ok[B] & loin_ok[C] & loin_ok[D]
 
+    # Récupération de la LUT de brouillard spécifique au biome de la zone
+    fog_lut_biome = zone["fog_lut"]
+
     q = np.nonzero(tous_proches & tous_loin_ok)[0]
     if q.size:
         idx = np.stack((A[q], B[q], C[q], D[q]), axis=1)
@@ -130,7 +141,7 @@ def collecter_terrain(zone, items):
             prof = rz[idx].mean(axis=1)
             fog = np.minimum((prof * FOG_MAX_INV).astype(np.int32), config.FOG_STEPS - 1)
             polys = np.stack((X, Y), axis=2).tolist()
-            couleurs = [FOG_LUT[i] for i in fog.tolist()]
+            couleurs = [fog_lut_biome[i] for i in fog.tolist()]
             items.extend(zip(prof.tolist(), repeat(0), polys, couleurs))
 
     partiels = np.nonzero((nA | nB | nC | nD) & ~tous_proches & tous_loin_ok)[0]
@@ -144,8 +155,13 @@ def collecter_terrain(zone, items):
         pts2 = [(max(-20000, min(20000, int(W2 + x * F / z))),
                  max(-20000, min(20000, int(H2 + y * F / z)))) for x, y, z in pts3]
         prof = sum(p[2] for p in pts3) / len(pts3)
-        items.append((prof, 2, (pts2, flags), _couleur_fog(prof)))
-
+        
+        # Calcul de la couleur de brouillard locale pour les polygones partiels
+        i_fog = int(prof * FOG_MAX_INV)
+        i_fog = i_fog if i_fog < config.FOG_STEPS - 1 else config.FOG_STEPS - 1
+        col_fog = fog_lut_biome[i_fog]
+        
+        items.append((prof, 2, (pts2, flags), col_fog))
 
 def _segments_entites(bases, P1, P2, couleurs_seg=None, couleurs_inst=None):
     k, m = len(bases), P1.shape[0]
@@ -167,7 +183,6 @@ def _segments_entites(bases, P1, P2, couleurs_seg=None, couleurs_inst=None):
                              for j in range(m) if ok[i][j]])
     return resultat
 
-
 def _barre_vie(ex, ey, rz, m):
     frac = max(0.0, m.hp / m.hp_max)
     w = max(10.0, 12000.0 / rz)
@@ -179,7 +194,118 @@ def _barre_vie(ex, ey, rz, m):
     return [((x0, y), (x1, y), fond), ((x0, y + 2), (x1, y + 2), fond),
             ((x0, y), (xf, y), plein), ((x0, y + 2), (xf, y + 2), plein)]
 
+# ---------------------------------------------------------------------------
+# BOSS
+# ---------------------------------------------------------------------------
+def collecter_boss(items, temps):
+    b = boss_module.boss
+    if b is None:
+        return
 
+    y = get_hauteur_sol(b.x, b.z) + config.BOSS_OFFSET_MODELE + b.saut_hauteur_courante
+    pos = np.array([[b.x, y, b.z]], dtype=np.float32)
+
+    if b.etat == "charge":
+        yaw = math.atan2(b.charge_dir[0], b.charge_dir[1])
+    else:
+        dx = config.cam_x - b.x
+        dz = config.cam_z - b.z
+        yaw = math.atan2(dx, dz) if (dx != 0 or dz != 0) else 0.0
+    yaw += BOSS_YAW_OFFSET
+
+    B1 = _tourner_y(BOSS_P1, yaw)
+    B2 = _tourner_y(BOSS_P2, yaw)
+
+    if b.en_spawn:
+        puls = 0.5 + 0.5 * math.sin(temps * 15)
+        couleur = (int(255 * puls), int(80 * puls), int(80 * puls))
+    else:
+        puls = 0.6 + 0.4 * math.sin(temps * 8)
+        frac = b.hp / b.hp_max if b.hp_max > 0 else 1.0
+        intensite = 0.5 + 0.5 * (1 - frac)
+        couleur = (int(255 * intensite), int(60 * puls), int(60 * puls))
+
+    segs_l = _segments_entites(pos, B1, B2, [couleur] * B1.shape[0])
+    if segs_l and segs_l[0]:
+        _, _, rz, v = projeter_3d_masse(pos)
+        prof = float(rz[0]) - BIAIS_ENTITES
+        items.append((prof, 3, segs_l[0], None))
+
+def collecter_projectiles_boss(items):
+    if not boss_module.projectiles_boss:
+        return
+    for p in boss_module.projectiles_boss:
+        p0 = np.array([[p[0], p[1], p[2]]], dtype=np.float32)
+        n = math.sqrt(p[3] ** 2 + p[4] ** 2 + p[5] ** 2) + 1e-6
+        p1 = np.array([[p[0] - p[3] / n * 55,
+                        p[1] - p[4] / n * 55,
+                        p[2] - p[5] / n * 55]], dtype=np.float32)
+        ax, ay, rz, va = projeter_3d_masse(p0)
+        bx, by, _, vb = projeter_3d_masse(p1)
+        if va[0] and vb[0]:
+            items.append((float(rz[0]) - 20, 5,
+                          ((int(ax[0]), int(ay[0])), (int(bx[0]), int(by[0]))),
+                          None))
+
+def dessiner_barre_vie_boss(surf, temps):
+    b = boss_module.boss
+    if b is None:
+        return
+
+    if b.en_spawn:
+        frac = 1.0 - max(0.0, b.t_spawn) / config.BOSS_SPAWN_ANIM_DUREE
+        frac = min(1.0, max(0.0, frac))
+    else:
+        frac = b.hp / b.hp_max if b.hp_max > 0 else 0.0
+
+    largeur = int(config.LARGEUR * 0.65)
+    hauteur = 46
+    x0 = (config.LARGEUR - largeur) // 2
+    y0 = 40
+
+    puls = 0.6 + 0.4 * math.sin(temps * 6)
+    puls2 = 0.5 + 0.5 * math.sin(temps * 12 + 1.3)
+
+    fond = pygame.Surface((largeur, hauteur), pygame.SRCALPHA)
+    fond.fill((0, 0, 0, 200))
+    surf.blit(fond, (x0, y0))
+
+    bord = (int(255 * puls), int(40 * puls2), int(40 * puls2))
+    pygame.draw.rect(surf, bord, (x0, y0, largeur, hauteur), 4)
+
+    rempli = int((largeur - 6) * frac)
+    if rempli > 0:
+        if b.en_spawn:
+            cr = int(255 * (0.3 + 0.7 * frac))
+            cg = int(80 * frac)
+            cb = int(80 * frac)
+        else:
+            frac_hp = b.hp / b.hp_max if b.hp_max > 0 else 0
+            intensite = 0.5 + 0.5 * (1 - frac_hp)
+            cr = int(255 * intensite)
+            cg = int(50 * puls)
+            cb = int(50 * puls)
+        pygame.draw.rect(surf, (cr, cg, cb),
+                         (x0 + 3, y0 + 3, rempli, hauteur - 6))
+
+    for i in range(1, 10):
+        sx = x0 + 3 + (largeur - 6) * i // 10
+        pygame.draw.line(surf, (0, 0, 0), (sx, y0 + 5), (sx, y0 + hauteur - 5), 2)
+
+    if int(temps * 4) % 2 == 0:
+        font = pygame.font.SysFont(None, 42)
+        txt = font.render(f"BOSS NIVEAU {b.niveau + 1}", True, (255, 200, 200))
+        surf.blit(txt, (x0 + largeur // 2 - txt.get_width() // 2, y0 + hauteur + 8))
+
+    if b.en_spawn and int(temps * 8) % 2 == 0:
+        font = pygame.font.SysFont(None, 96)
+        txt = font.render("⚠ DANGER ⚠", True, (255, 40, 40))
+        surf.blit(txt, (config.LARGEUR // 2 - txt.get_width() // 2,
+                        config.HAUTEUR // 2 - 120))
+
+# ---------------------------------------------------------------------------
+# Entités
+# ---------------------------------------------------------------------------
 def collecter_entites(zone, items, temps):
     bases = zone["arbres"]
     if len(bases):
@@ -215,12 +341,15 @@ def collecter_entites(zone, items, temps):
                     items.append((p - BIAIS_ENTITES, 3, segs, None))
                 m = mons[i]
                 if m.hp < m.hp_max:
-                    items.append((p - BIAIS_ENTITES - 5, 1, _barre_vie(int(ex[i]), int(ey[i]), p, m), None))
+                    items.append((p - BIAIS_ENTITES - 5, 1,
+                                  _barre_vie(int(ex[i]), int(ey[i]), p, m), None))
 
     if entity.pickups:
-        arr = np.array(entity.pickups, dtype=np.float64)   # [x, z, type, t]
+        arr = np.array(entity.pickups, dtype=np.float64)
         bob = np.sin(temps * 3 + arr[:, 0] * 0.01) * 6 + 45
-        pos = np.column_stack((arr[:, 0], get_hauteur_sol(arr[:, 0], arr[:, 1]) + bob, arr[:, 1])).astype(np.float32)
+        pos = np.column_stack((arr[:, 0],
+                               get_hauteur_sol(arr[:, 0], arr[:, 1]) + bob,
+                               arr[:, 1])).astype(np.float32)
         _, _, rz, v = projeter_3d_masse(pos)
         ang = temps * 2.0
         for id_t, P1, P2, col in ((0, MUN_P1, MUN_P2, COULEUR_MUNITIONS),
@@ -243,8 +372,9 @@ def collecter_entites(zone, items, temps):
         ax, ay, rz, va = projeter_3d_masse(p0)
         bx, by, _, vb = projeter_3d_masse(p1)
         for i in np.nonzero(va & vb)[0].tolist():
-            items.append((float(rz[i]) - 20, 4, ((int(ax[i]), int(ay[i])), (int(bx[i]), int(by[i]))), None))
-
+            items.append((float(rz[i]) - 20, 4,
+                          ((int(ax[i]), int(ay[i])), (int(bx[i]), int(by[i]))),
+                          None))
 
 # ---------------------------------------------------------------------------
 # Coffres
@@ -284,9 +414,8 @@ def collecter_coffres(zone, items, temps):
             if segs:
                 items.append((prof, 3, segs, None))
 
-
 # ---------------------------------------------------------------------------
-# Butins pyramides (avec pop-in visible)
+# Butins
 # ---------------------------------------------------------------------------
 def collecter_butins(items, temps):
     if not boosts.butins_au_sol:
@@ -298,7 +427,6 @@ def collecter_butins(items, temps):
     ph = np.array([b.phase for b in butins], dtype=np.float32)
     spawn = np.array([b.spawn_time for b in butins], dtype=np.float64)
 
-    # Pop-in : grandit de 0.3 à 1 sur 0.35 s, et descend de +120 à +30
     age = np.clip(temps - spawn, 0.0, 0.35)
     t_anim = age / 0.35
     scale = 0.3 + 0.7 * t_anim
@@ -312,8 +440,6 @@ def collecter_butins(items, temps):
 
     for i in range(k):
         sc = float(scale[i])
-        P1r = PYR_P1 * sc
-        P2r = PYR_P2 * sc
         P1r = np.column_stack((
             PYR_P1[:, 0] * c * sc + PYR_P1[:, 2] * s * sc,
             PYR_P1[:, 1] * sc,
@@ -342,7 +468,6 @@ def collecter_butins(items, temps):
             prof = float(rz[ok].mean()) - BIAIS_ENTITES
             items.append((prof, 3, segs, None))
 
-
 # ---------------------------------------------------------------------------
 # Interaction coffres
 # ---------------------------------------------------------------------------
@@ -364,21 +489,51 @@ def ouvrir_coffre_proche(zone, joueur_x, joueur_z, distance=DISTANCE_INTERACTION
     boosts.spawner_butin(butin)
     return butin
 
+# ---------------------------------------------------------------------------
+# Overlay debug
+# ---------------------------------------------------------------------------
+def dessiner_debug_stats(surf, joueur, stats):
+    font = pygame.font.SysFont(None, 22)
+    lignes = [
+        f"PV : {joueur.pv}/{config.JOUEUR_PV_MAX}",
+        f"Vitesse : x{stats.vitesse_mult:.2f}  (+{int(stats.vitesse_bonus*100)}%)",
+        f"Saut : x{stats.saut_mult:.2f}  (+{int(stats.saut_bonus*100)}%)",
+        f"Degats : x{stats.degats_mult:.2f}  (+{int(stats.degats_bonus*100)}%)",
+        f"Auto-regen : {'ON' if stats.auto_regen else 'off'}",
+        f"Munitions : {joueur.chargeur} / {joueur.reserve}",
+        f"Kills : {joueur.kills}",
+    ]
+    pad = 8
+    largeur = 380
+    hauteur = len(lignes) * 22 + pad * 2
+    x0 = 12
+    y0 = config.HAUTEUR - hauteur - 120
+    bg = pygame.Surface((largeur, hauteur), pygame.SRCALPHA)
+    bg.fill((0, 0, 0, 160))
+    surf.blit(bg, (x0, y0))
+    for i, ligne in enumerate(lignes):
+        txt = font.render(ligne, True, (200, 255, 200))
+        surf.blit(txt, (x0 + pad, y0 + pad + i * 22))
 
 # ---------------------------------------------------------------------------
-# Dessin
+# Dessin des items
 # ---------------------------------------------------------------------------
-def dessiner_items(surf, items):
+def dessiner_items(surf, items, zone=None):
     items.sort(key=itemgetter(0), reverse=True)
     poly, ligne = pygame.draw.polygon, pygame.draw.line
     noir = config.COULEUR_REMPLISSAGE
+
+    # Récupération de la couleur de grille du biome si disponible
+    couleur_grille_biome = zone.get("couleur_grille", (255, 0, 128)) if zone else (255, 0, 128)
 
     for prof, genre, data, col in items:
         if genre == 0:
             poly(surf, noir, data)
             if prof < DIST_GLOW_TERRAIN:
-                poly(surf, glow_de(col), data, 4)
-            poly(surf, col, data, 2 if prof < DIST_BORD_EPAIS else 1)
+                # Utilisation de la couleur du biome pour le glow de la grille
+                poly(surf, glow_de(couleur_grille_biome), data, 4)
+            # Utilisation de la couleur du biome pour les arêtes de la grille
+            poly(surf, couleur_grille_biome, data, 2 if prof < DIST_BORD_EPAIS else 1)
         elif genre == 1:
             for p1, p2, c in data:
                 ligne(surf, c, p1, p2, 2)
@@ -392,6 +547,10 @@ def dessiner_items(surf, items):
             ligne(surf, (120, 20, 90), data[0], data[1], 10)
             ligne(surf, (255, 70, 170), data[0], data[1], 5)
             ligne(surf, BLANC, data[0], data[1], 2)
+        elif genre == 5:
+            ligne(surf, (140, 0, 0), data[0], data[1], 14)
+            ligne(surf, (255, 40, 40), data[0], data[1], 7)
+            ligne(surf, (255, 220, 100), data[0], data[1], 2)
         else:
             pts, flags = data
             poly(surf, noir, pts)
@@ -400,7 +559,9 @@ def dessiner_items(surf, items):
                 if flags[k]:
                     ligne(surf, col, pts[k], pts[(k + 1) % n], 2)
 
-
+# ---------------------------------------------------------------------------
+# Jeu
+# ---------------------------------------------------------------------------
 # ---------------------------------------------------------------------------
 # Jeu
 # ---------------------------------------------------------------------------
@@ -418,15 +579,27 @@ class Jeu:
         self.popup_timer = 0.0
         self.popup_color = (255, 255, 255)
         self.font_popup = pygame.font.SysFont(None, 56)
+        self.debug_stats = DEBUG_STATS
+        self.terminal = TerminalInventory()
+        self.en_inventaire = False
         self.reinitialiser()
 
     def reinitialiser(self):
         reinitialiser_monde()
         entity.reinitialiser_entites()
         boosts.vider_butins()
+        boss_module.reinitialiser_boss()
         self.stats = StatsBoostes()
+        self.couche_max = 0          # couche la plus profonde atteinte (progression / boss)
         config.cam_x, config.cam_z = config.DEPART_X, config.DEPART_Z
+        
+        # Récupération dynamique du biome pour placer la caméra à la bonne hauteur sur le relief
+        biome_actuel = terrain.get_biome_actuel(
+            int(math.floor(config.cam_x / (config.TAILLE_CHUNKS * config.ECHELLE_GRILLE))), 
+            int(math.floor(config.cam_z / (config.TAILLE_CHUNKS * config.ECHELLE_GRILLE)))
+        )
         config.cam_y = get_hauteur_sol(config.cam_x, config.cam_z) - 30
+        
         config.yaw = config.pitch = config.vitesse_y = 0.0
         config.mettre_a_jour_rayons()
         self.joueur.reinitialiser()
@@ -462,11 +635,7 @@ class Jeu:
 
     def interagir_coffre(self):
         butin = ouvrir_coffre_proche(self.zone, config.cam_x, config.cam_z)
-        if butin is None:
-            return
-        self.popup_text = f"+ {butin.nom}"
-        self.popup_timer = 2.0
-        self.popup_color = boosts.COULEURS_RARETE[butin.rarete]
+        return butin
 
     def recharger(self):
         if self.joueur.mort:
@@ -489,7 +658,13 @@ class Jeu:
         config.cam_x += (avant * math.sin(rad) + cote * math.cos(rad)) * vitesse
         config.cam_z += (avant * math.cos(rad) - cote * math.sin(rad)) * vitesse
 
+        # Calcul de la hauteur du sol selon le biome actuel de la zone
+        biome_courant = terrain.get_biome_actuel(
+            int(math.floor(config.cam_x / (config.TAILLE_CHUNKS * config.ECHELLE_GRILLE))),
+            int(math.floor(config.cam_z / (config.TAILLE_CHUNKS * config.ECHELLE_GRILLE)))
+        )
         sol = get_hauteur_sol(config.cam_x, config.cam_z) - 30
+
         if saut and abs(config.cam_y - sol) < 2:
             config.vitesse_y = -300 * self.stats.saut_mult
         config.vitesse_y += config.gravite * dt
@@ -499,11 +674,22 @@ class Jeu:
             config.vitesse_y = 0
 
         self._maj_zone()
-        boosts.ramasser_butins(j, self.stats, config.cam_x, config.cam_z)
+
+        # Progression : nouvelle couche atteinte -> annonce
+        couche = terrain.get_couche_monde(config.cam_x, config.cam_z)
+        if couche > self.couche_max:
+            self.couche_max = couche
+            biome = terrain.BIOMES[terrain.COUCHES[couche]]
+            self.popup_text = f"COUCHE {couche + 1}/{terrain.NB_COUCHES} - {biome['nom']}"
+            self.popup_color = biome["couleur_grille"]
+            self.popup_timer = 3.5
+        boosts.ramasser_butins(j, self.stats, config.cam_x, config.cam_z, dt)
 
         entity.mettre_a_jour_monstres(dt, self.zone["cles"], j, temps)
         entity.mettre_a_jour_projectiles(dt, j)
-        entity.mettre_a_jour_pickups(j)
+        entity.mettre_a_jour_pickups(j, dt)
+        boss_module.mettre_a_jour_boss(dt, j, temps)
+        boss_module.mettre_a_jour_projectiles_boss(dt, j)
 
     def rendre(self, temps):
         surf = self.surf
@@ -512,9 +698,11 @@ class Jeu:
         items = []
         collecter_terrain(self.zone, items)
         collecter_coffres(self.zone, items, temps)
+        collecter_boss(items, temps)
+        collecter_projectiles_boss(items)
         collecter_butins(items, temps)
         collecter_entites(self.zone, items, temps)
-        dessiner_items(surf, items)
+        dessiner_items(surf, items, self.zone)
 
         j = self.joueur
         if not j.mort:
@@ -526,14 +714,20 @@ class Jeu:
                 pygame.draw.circle(surf, BLANC, MUZZLE, 10)
                 pygame.draw.circle(surf, CYAN, MUZZLE, 20, 2)
             self.hud.dessiner_arme(surf, j, self.tir_t / 0.10)
-        self.hud.dessiner(surf, j, temps)
 
-        # Popup de butin
+        self.hud.dessiner(surf, j, temps, self.stats)
+        dessiner_barre_vie_boss(surf, temps)
+
+        if self.stats.messages_ramassage:
+            texte, couleur = self.stats.messages_ramassage[-1]
+            self.stats.messages_ramassage.clear()
+            self.popup_text = texte
+            self.popup_color = couleur
+            self.popup_timer = 2.5
+
         if self.popup_timer > 0 and self.popup_text:
-            alpha = min(1.0, self.popup_timer / 0.4)   # fondu sur les 0.4 dernières s
-            color = self.popup_color
-            txt = self.font_popup.render(self.popup_text, True, color)
-            # Fond sombre semi-transparent
+            alpha = min(1.0, self.popup_timer / 0.4)
+            txt = self.font_popup.render(self.popup_text, True, self.popup_color)
             pad = 16
             bg = pygame.Surface((txt.get_width() + pad * 2, txt.get_height() + pad),
                                 pygame.SRCALPHA)
@@ -544,10 +738,23 @@ class Jeu:
             txt.set_alpha(int(255 * alpha))
             surf.blit(txt, (cx - txt.get_width() // 2, cy - txt.get_height() // 2))
 
+        if self.debug_stats:
+            dessiner_debug_stats(surf, j, self.stats)
+
+        if self.en_inventaire:
+            overlay = pygame.Surface((config.LARGEUR, config.HAUTEUR), pygame.SRCALPHA)
+            overlay.fill((0, 0, 0, 160)) # Voile noir semi-transparent (effet pause)
+            surf.blit(overlay, (0, 0))
+            
+            font_term = pygame.font.SysFont(None, 24)
+            self.terminal.dessiner(surf, font_term)
+
         if j.mort:
             self.hud.dessiner_game_over(surf, j, temps)
 
-
+# ---------------------------------------------------------------------------
+# Boucle principale
+# ---------------------------------------------------------------------------
 # ---------------------------------------------------------------------------
 # Boucle principale
 # ---------------------------------------------------------------------------
@@ -570,22 +777,46 @@ def main():
         for event in pygame.event.get():
             if event.type == pygame.QUIT or (event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE):
                 en_cours = False
-            elif event.type == pygame.MOUSEMOTION:
-                jeu.regarder(*event.rel)
-            elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-                jeu.tirer()
-            elif event.type == pygame.KEYDOWN and event.key == pygame.K_f:
-                jeu.interagir_coffre()
-            elif event.type == pygame.KEYDOWN and event.key == pygame.K_r:
-                jeu.recharger()
-            elif event.type == pygame.KEYDOWN and event.key == pygame.K_RETURN and jeu.joueur.mort:
-                jeu.recharger()
+            
+            # --- 1. OUVERTURE DU TERMINAL VIA TAB (Uniquement si fermé) ---
+            elif event.type == pygame.KEYDOWN and event.key == pygame.K_TAB and not jeu.en_inventaire:
+                jeu.en_inventaire = True
+                pygame.mouse.set_visible(True)
+                pygame.event.set_grab(False)
+                continue
 
-        touches = pygame.key.get_pressed()
-        jeu.mettre_a_jour(dt, temps,
-                          touches[pygame.K_z] - touches[pygame.K_s],
-                          touches[pygame.K_d] - touches[pygame.K_q],
-                          touches[pygame.K_SPACE])
+            # --- 2. SI LE TERMINAL EST OUVERT ---
+            if jeu.en_inventaire:
+                # On envoie TOUS les événements clavier au terminal (plus de fermeture intempestive par touche bindée)
+                action = jeu.terminal.handle_event(event)
+                if action == "CLOSE_TERMINAL":
+                    jeu.en_inventaire = False
+                    pygame.mouse.set_visible(False)
+                    pygame.event.set_grab(True)
+            
+            # --- 3. SI LE JEU EST ACTIF (FPS) ---
+            else:
+                if event.type == pygame.MOUSEMOTION:
+                    jeu.regarder(*event.rel)
+                elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                    jeu.tirer()
+                elif event.type == pygame.KEYDOWN and event.key == pygame.K_f:
+                    jeu.interagir_coffre()
+                elif event.type == pygame.KEYDOWN and event.key == pygame.K_r:
+                    jeu.recharger()
+                elif event.type == pygame.KEYDOWN and event.key == pygame.K_F3:
+                    jeu.debug_stats = not jeu.debug_stats
+                elif event.type == pygame.KEYDOWN and event.key == pygame.K_RETURN and jeu.joueur.mort:
+                    jeu.recharger()
+
+        # Vraie pause totale du jeu si l'inventaire est ouvert
+        if not jeu.en_inventaire:
+            touches = pygame.key.get_pressed()
+            jeu.mettre_a_jour(dt, temps,
+                              touches[pygame.K_z] - touches[pygame.K_s],
+                              touches[pygame.K_d] - touches[pygame.K_q],
+                              touches[pygame.K_SPACE])
+
         jeu.rendre(temps)
         pygame.display.flip()
 
@@ -596,7 +827,6 @@ def main():
 
     pygame.quit()
     sys.exit()
-
 
 if __name__ == "__main__":
     main()

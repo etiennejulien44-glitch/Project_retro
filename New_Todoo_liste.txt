@@ -1,0 +1,13 @@
+
+
+POUR la 0.1.0
+Principale pour la 0.1.0 > avoir un jeu fun sans bug, agréable et une fin avec progression.
+
+-réparer les nivelet entre les biomes,
+-crée une logique de progression avec différents biomes (dans un 1e temps commencer avec 5 biomes)
+-terminer le system d implémentation facile pour les bonuses ainsi que pour les items qui existent dans le jeux (les 2 serons liée)
+car les loot des coffres serons l un des 2 ou des ressources
+Ajouter des partucules de tires qd cible toucher (mettre un effet avec de l hexadecimal en ROUGE VIF)
+-Ajouter bosses a chaque couche atteinte de la map
+-changer les nom des éléments & ajouter des mecaniques / builings en lien avec la da du jeux -> 
+le but de d avoir l impression d etre dans un system numérique/informatique

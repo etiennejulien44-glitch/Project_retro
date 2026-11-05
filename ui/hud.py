@@ -1,7 +1,7 @@
 # hud.py  --  interface néon : PV, munitions, score, arme, game over
 import math
 import pygame
-import config
+from data import config
 
 CYAN = (60, 240, 255)
 ROSE = (255, 60, 200)
@@ -11,7 +11,7 @@ BLANC = (255, 255, 255)
 SOMBRE = (14, 0, 34)
 VIDE = (60, 25, 100)
 
-MUZZLE = (config.LARGEUR // 2 + 40, config.HAUTEUR - 110)   # bout du canon (origine du rayon)
+MUZZLE = (config.LARGEUR // 2 + 40, config.HAUTEUR - 110)
 
 
 class HUD:
@@ -23,7 +23,7 @@ class HUD:
         self.voile = pygame.Surface((config.LARGEUR, config.HAUTEUR), pygame.SRCALPHA)
         self.voile.fill((10, 0, 25, 175))
 
-    # -- texte (mis en cache : on ne re-rend pas la police à chaque frame) --
+    # -- texte (cache) --
     def _texte(self, txt, police, couleur):
         cle = (txt, id(police), couleur)
         img = self._cache.get(cle)
@@ -48,7 +48,7 @@ class HUD:
         oy = recul * 16
         p = j.progression_recharge()
         if p > 0:
-            oy += 90 * math.sin(math.pi * p)             # l'arme plonge pendant le rechargement
+            oy += 90 * math.sin(math.pi * p)
         x0, y0 = MUZZLE[0], MUZZLE[1] + oy
         H = config.HAUTEUR
         corps = [(x0 - 16, y0), (x0 + 16, y0), (x0 + 36, H + 4 + oy), (x0 - 36, H + 4 + oy)]
@@ -57,17 +57,38 @@ class HUD:
         pygame.draw.line(surf, ROSE, (x0 - 26, y0 + 60), (x0 + 26, y0 + 60), 3)
         pygame.draw.line(surf, ROSE, (x0 - 30, y0 + 80), (x0 + 30, y0 + 80), 3)
 
+    # -- bonus permanents (haut droite) --
+    def _dessiner_bonus(self, surf, stats):
+        if stats is None:
+            return
+        lignes = []
+        if stats.vie_max_pct > 0:
+            lignes.append((f"VIE MAX +{int(stats.vie_max_pct*100)}%", JAUNE))
+        if stats.vitesse_bonus > 0:
+            lignes.append((f"VITESSE +{int(stats.vitesse_bonus*100)}%", CYAN))
+        if stats.saut_bonus > 0:
+            lignes.append((f"SAUT +{int(stats.saut_bonus*100)}%", CYAN))
+        if stats.degats_bonus > 0:
+            lignes.append((f"DEGATS +{int(stats.degats_bonus*100)}%", ROSE))
+        if stats.auto_regen:
+            lignes.append(("REGEN 1 PV/2s", BLANC))
+        x = config.LARGEUR - 24
+        y = 22
+        for txt, col in lignes:
+            self._ecrire(surf, txt, self.f_petit, col, x, y, "d")
+            y += 26
+
     # -- HUD principal --
-    def dessiner(self, surf, j, temps):
+    def dessiner(self, surf, j, temps, stats=None):
         W, H = config.LARGEUR, config.HAUTEUR
         rect, ligne = pygame.draw.rect, pygame.draw.line
 
-        # --- flash de dégâts : cadre rouge/rose ---
         if j.flash_degats > 0:
             k = min(1.0, j.flash_degats / 0.35)
             for i in range(4):
                 f = k * (1 - i / 4)
-                rect(surf, (int(255 * f), 0, int(90 * f)), (i * 7, i * 7, W - 2 * i * 7, H - 2 * i * 7), 7)
+                rect(surf, (int(255 * f), 0, int(90 * f)),
+                     (i * 7, i * 7, W - 2 * i * 7, H - 2 * i * 7), 7)
 
         # réticule
         cx, cy = W // 2, H // 2
@@ -75,17 +96,19 @@ class HUD:
                      ((cx, cy - 12), (cx, cy - 4)), ((cx, cy + 4), (cx, cy + 12))):
             ligne(surf, CYAN, a, b, 2)
 
-        # marqueurs de touche / kill
+        # marqueurs hit / kill
         if j.t_kill > 0:
             for dx, dy in ((-1, -1), (1, -1), (-1, 1), (1, 1)):
-                ligne(surf, ROSE, (cx + dx * 8, cy + dy * 8), (cx + dx * 20, cy + dy * 20), 3)
+                ligne(surf, ROSE, (cx + dx * 8, cy + dy * 8),
+                      (cx + dx * 20, cy + dy * 20), 3)
         elif j.t_hit > 0:
             for dx, dy in ((-1, -1), (1, -1), (-1, 1), (1, 1)):
-                ligne(surf, BLANC, (cx + dx * 8, cy + dy * 8), (cx + dx * 16, cy + dy * 16), 2)
+                ligne(surf, BLANC, (cx + dx * 8, cy + dy * 8),
+                      (cx + dx * 16, cy + dy * 16), 2)
 
-        # --- PV (bas gauche) ---
+        # --- PV (bas gauche) : lit config.JOUEUR_PV_MAX dynamiquement ---
         x, y = 24, H - 42
-        ratio = j.pv / config.JOUEUR_PV_MAX
+        ratio = j.pv / config.JOUEUR_PV_MAX if config.JOUEUR_PV_MAX > 0 else 0.0
         if ratio > 0.5:
             col = CYAN
         elif ratio > 0.25:
@@ -96,7 +119,7 @@ class HUD:
         rect(surf, col, (x + 36, y, 204, 20), 2)
         if j.pv > 0:
             rect(surf, col, (x + 40, y + 4, int(196 * ratio), 12))
-        self._ecrire(surf, str(j.pv), self.f_petit, col, x + 250, y + 2)
+        self._ecrire(surf, f"{j.pv}/{config.JOUEUR_PV_MAX}", self.f_petit, col, x + 250, y + 2)
 
         # --- munitions (bas droite) ---
         xd = W - 24
@@ -122,16 +145,20 @@ class HUD:
         # --- score (haut gauche) ---
         self._ecrire(surf, f"SCORE  {j.kills * 100}", self.f_moyen, ROSE, 24, 18)
 
-        # --- message temporaire ---
+        # --- message temporaire (centre) ---
         if j.t_message > 0:
             self._ecrire(surf, j.message, self.f_moyen, JAUNE, W // 2, H // 2 + 60, "c")
 
+        # --- bonus cumulés (haut droite) ---
+        self._dessiner_bonus(surf, stats)
 
     def dessiner_game_over(self, surf, j, temps):
         W, H = config.LARGEUR, config.HAUTEUR
         surf.blit(self.voile, (0, 0))
         self._ecrire(surf, "GAME OVER", self.f_grand, CYAN, W // 2 + 4, H // 2 - 96, "c")
         self._ecrire(surf, "GAME OVER", self.f_grand, ROSE, W // 2, H // 2 - 100, "c")
-        self._ecrire(surf, f"SCORE  {j.kills * 100}   ({j.kills} ennemis)", self.f_moyen, JAUNE, W // 2, H // 2 + 10, "c")
+        self._ecrire(surf, f"SCORE  {j.kills * 100}   ({j.kills} ennemis)",
+                     self.f_moyen, JAUNE, W // 2, H // 2 + 10, "c")
         if math.sin(temps * 4) > -0.3:
-            self._ecrire(surf, "[R] REJOUER      [ECHAP] QUITTER", self.f_petit, BLANC, W // 2, H // 2 + 70, "c")
+            self._ecrire(surf, "[R] REJOUER      [ECHAP] QUITTER",
+                         self.f_petit, BLANC, W // 2, H // 2 + 70, "c")

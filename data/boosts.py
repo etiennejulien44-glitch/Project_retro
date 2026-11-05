@@ -5,7 +5,7 @@ import random
 import time
 import numpy as np
 
-import config
+from . import config
 
 
 # =============================================================
@@ -50,7 +50,6 @@ DEFS = {
                              f"Munitions +{config.PACK_MUNITIONS}"),
     "SOIN_V":       DefBoost(TypeBoost.SOIN,       Rarete.VERT,  0,
                              f"Soin +{config.PACK_SOIN} PV"),
-
     "VIE_V":        DefBoost(TypeBoost.VIE_MAX,    Rarete.VERT,
                              config.FORCE_VIE_V,
                              f"Vie max +{config.FORCE_VIE_V*100:.0f}%"),
@@ -91,11 +90,11 @@ TABLE_PRISMATIQUE = [
 
 
 # =============================================================
-#  Butin
+#  Butin au sol
 # =============================================================
 class Butin:
-    __slots__ = ("x", "z", "def_id", "type", "rarete", "valeur", "nom", "phase",
-                 "spawn_time")
+    __slots__ = ("x", "z", "def_id", "type", "rarete", "valeur", "nom",
+                 "phase", "spawn_time")
     def __init__(self, x, z, def_id):
         self.x = float(x)
         self.z = float(z)
@@ -118,7 +117,7 @@ def vider_butins():
 # =============================================================
 #  Tirage & spawn
 # =============================================================
-DELAI_GRACE_BUTIN = 0.6
+DELAI_GRACE_BUTIN = 1.5
 
 
 def tirer_butin(type_coffre, x, z, rand_gen=None):
@@ -136,30 +135,50 @@ def tirer_butin(type_coffre, x, z, rand_gen=None):
 
 def spawner_butin(butin):
     if butin.type == TypeBoost.MUNITIONS:
-        import entity
+        from world import entity
         entity.pickups.append([butin.x, butin.z, 0, butin.spawn_time])
         return
     if butin.type == TypeBoost.SOIN:
-        import entity
+        from world import entity
         entity.pickups.append([butin.x, butin.z, 1, butin.spawn_time])
         return
     butins_au_sol.append(butin)
 
 
 # =============================================================
-#  Ramassage auto (avec délai de grâce)
+#  Ramassage auto (aimant + cap check)
 # =============================================================
-def ramasser_butins(joueur, stats, joueur_x, joueur_z, distance=120):
+def ramasser_butins(joueur, stats, joueur_x, joueur_z, dt):
     now = time.time()
     survivants = []
     for b in butins_au_sol:
         if now - b.spawn_time < DELAI_GRACE_BUTIN:
             survivants.append(b)
             continue
-        if math.hypot(b.x - joueur_x, b.z - joueur_z) < distance:
+
+        d = math.hypot(b.x - joueur_x, b.z - joueur_z)
+
+        if d < config.RAYON_RAMASSAGE_BUTINS:
+            # Skip silencieux si le boost est déjà au cap
+            if b.type == TypeBoost.VITESSE and stats.vitesse_bonus >= config.CAP_VITESSE:
+                continue
+            if b.type == TypeBoost.SAUT and stats.saut_bonus >= config.CAP_SAUT:
+                continue
+            if b.type == TypeBoost.DEGATS and stats.degats_bonus >= config.CAP_DEGATS:
+                continue
+            if b.type == TypeBoost.AUTO_REGEN and stats.auto_regen:
+                continue
             stats.appliquer(b, joueur)
-        else:
-            survivants.append(b)
+            continue
+
+        if d < config.RAYON_AIMANT_BUTINS:
+            step = config.VITESSE_AIMANT_BUTINS * dt
+            if step > d:
+                step = d
+            b.x += (joueur_x - b.x) / d * step
+            b.z += (joueur_z - b.z) / d * step
+
+        survivants.append(b)
     butins_au_sol[:] = survivants
 
 
@@ -197,6 +216,9 @@ class StatsBoostes:
         self.auto_regen = False
         self.regen_timer = 0.0
 
+        # File de messages à consommer par le jeu pour les popups de ramassage
+        self.messages_ramassage = []   # [(texte, couleur)]
+
     @property
     def vitesse_mult(self):
         return 1.0 + self.vitesse_bonus
@@ -220,29 +242,60 @@ class StatsBoostes:
     def appliquer(self, butin, joueur):
         t = butin.type
         v = butin.valeur
+        couleur = COULEURS_RARETE[butin.rarete]
 
         if t == TypeBoost.VIE_MAX:
+            ancien_max = config.JOUEUR_PV_MAX
             self.vie_max_pct += v
             config.JOUEUR_PV_MAX = int(round(
                 self._base_pv_max * (1.0 + self.vie_max_pct)))
             joueur.pv = min(config.JOUEUR_PV_MAX,
                             joueur.pv + int(v * self._base_pv_max))
+            self.messages_ramassage.append(
+                (f"VIE MAX : {ancien_max} -> {config.JOUEUR_PV_MAX}", couleur))
+            return
 
-        elif t == TypeBoost.VITESSE:
+        if t == TypeBoost.VITESSE:
+            avant = self.vitesse_bonus
             self.vitesse_bonus = min(config.CAP_VITESSE, self.vitesse_bonus + v)
+            gain = int((self.vitesse_bonus - avant) * 100)
+            self.messages_ramassage.append(
+                (f"VITESSE +{gain}%  (total +{int(self.vitesse_bonus*100)}%)", couleur))
+            return
 
-        elif t == TypeBoost.SAUT:
+        if t == TypeBoost.SAUT:
+            avant = self.saut_bonus
             self.saut_bonus = min(config.CAP_SAUT, self.saut_bonus + v)
+            gain = int((self.saut_bonus - avant) * 100)
+            self.messages_ramassage.append(
+                (f"SAUT +{gain}%  (total +{int(self.saut_bonus*100)}%)", couleur))
+            return
 
-        elif t == TypeBoost.DEGATS:
+        if t == TypeBoost.DEGATS:
+            avant = self.degats_bonus
             self.degats_bonus = min(config.CAP_DEGATS, self.degats_bonus + v)
+            gain = int((self.degats_bonus - avant) * 100)
+            self.messages_ramassage.append(
+                (f"DEGATS +{gain}%  (total +{int(self.degats_bonus*100)}%)", couleur))
+            return
 
-        elif t == TypeBoost.AUTO_REGEN:
+        if t == TypeBoost.AUTO_REGEN:
             self.auto_regen = True
             self.regen_timer = 0.0
+            self.messages_ramassage.append(
+                ("AUTO-REGEN ACTIVEE (1 PV / 2 s)", couleur))
+            return
 
-        elif t == TypeBoost.SOIN:
+        if t == TypeBoost.SOIN:
+            avant = joueur.pv
             joueur.soigner(config.PACK_SOIN)
+            self.messages_ramassage.append(
+                (f"SOIN {avant} -> {joueur.pv}", couleur))
+            return
 
-        elif t == TypeBoost.MUNITIONS:
+        if t == TypeBoost.MUNITIONS:
+            avant = joueur.reserve
             joueur.ajouter_munitions(config.PACK_MUNITIONS)
+            self.messages_ramassage.append(
+                (f"MUNITIONS {avant} -> {joueur.reserve}", couleur))
+            return

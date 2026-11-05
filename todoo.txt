@@ -1,0 +1,81 @@
+rendre le code plus simple est optimisée,
+
+    EN résumer, actuellement le code est un bordel sans nom implémenter des chose est trop compliqué (plus dur qu en CSFML...)
+    Pour tout ce qui est moteur de jeux (il n y a plus besoins d y toucher a moin de l optimiser au max TOUT en ayant un bonne équilibre 
+    (crée un menu option pour laisser le joueur choisire certains aspect de ces perf ,fps max, vsync, fullscreen OR not, render distence etc))
+    crée des fonction ou class pour automatiser/simplier le jeux le but a la fin est d avoir un jeux ou,
+    si je veut crée un nouveau monstre c possible et simple,
+    si je veut qu il spawn sous certaine condition dans un certains biome sa doit etre possible
+    donc accesoirement changer bcp le code pour permettre au entité de spawn différement sous d autres condition.
+    L ojectif serais de crée un jeux style survie/dynamique l objectif et le gamplay restent encore un peut floux mais la DA actuelle a qlq chose
+
+
+    Note a part -> spawn des différent monstres gerer par des condition précis,
+    Exemple:
+        monstre_1:
+        possible_biome = [BIOME_1, BIOME_2, BIOME_4]
+        SPAWN TIME = [0,] #donne une plage d heure ou il pourra spawn
+        RATE = 0.2 #lui donner un taux d apparition dans la zone ou il est potentiellement autoriser a spawn a ce moment
+
+    BIOME
+        les biomes serons des éléments particuler, qui serons généré aléatoirement via les seed
+        un biome c quoi ? 
+        un regoupement de chunck avec des proprété différente en fonction des biome
+        (chaque biome est plus ou moin grand et plus ou moin rare)
+        Les propriété pourron et seront nombreuse mais dans un 1e temps les biomes auront ces propritété
+        -POOL de spawn de monstre ( a voir si ont fait spawn le monstre en checkant le biome ou en checkant le monstre individuellement (je pense que c plus opti de regarder uniquement ce qui peut spawn dans le biome et sous quel autres conditions))
+        donc regarder dans quel biome je suis ?
+        qu est ce qui peut apparaitre a coté de moi ? Monstre_1 Monstre_2 etc
+
+    dcp ont peut fair une arborescence de chaque élément
+
+
+    boucle de jeux -> Event     -> fin de jeux
+                                -> intéractions
+                   -> Affichage
+                   -> Map       -> BIOME ? Monstres / coffres / STRUCTURES
+                                        -> chunck ? Monstres / coffres / STRUCTURES
+
+
+        mon_fps_synthwave/
+    │
+    ├── main.py              # Boucle principale (Game Loop) et gestion des états
+    ├── engine/
+    │   ├── __init__.py
+    │   ├── vector3d.py      # Gestion des points 3D, matrices de rotation, projection
+    │   ├── camera.py        # Position, angles, mouvements du joueur
+    │   └── renderer.py      # Gestion de Pygame, traçage des lignes, effet glow
+    ├── world/
+    │   ├── __init__.py
+    │   ├── chunk.py         # Logique de génération des chunks et biomes
+    │   └── entities.py      # Classes pour les monstres, coffres et boss
+    └── ui/
+        ├── __init__.py
+        └── terminal.py      # Le faux terminal bash interactif
+    animation de mort pour les ennemies
+
+    Pour le terminal:
+        crée un inventair utilisant du bash
+        ls (pour voir tout les éléments)
+        ./ (pour séléctionner un élément dans l inventair)
+        cd pour rentrer dans les fichier
+        mettre cd & cd ..
+        avoir acces au tab pour autocompleter les phrases & avoir acces a l historique des commande avec les fleches
+    
+    exemple -> @user/home~bash$> cd inventory
+               @user/home/inventory~bash$> ls
+               weapon_1----12MB
+               weapon_2----15MB
+               weapon_3----15MB
+               Armor_1_----15MB
+               Armor_2_----15MB
+               health_-----15MB
+                            inventory:87MB/4GO
+
+    plusieurs éléments dans le menu de l inventair,
+    inventory, option, sound
+    ne pas oublier de mettre un -h pour les cmds
+    
+    
+                
+

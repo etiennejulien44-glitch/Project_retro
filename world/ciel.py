@@ -3,7 +3,7 @@ import math
 import random
 import numpy as np
 import pygame
-import config
+from data import config
 
 # ----- PALETTE (modifie ici pour changer l'ambiance) -----
 # du bas du ciel (horizon) vers le haut
@@ -101,7 +101,7 @@ class Ciel:
         ey = config.HAUTEUR * 0.5 + ry * config.FOCALE / rzs
         return ex, ey, ok
 
-    def dessiner(self, surf, temps):
+    def dessiner(self, surf, temps, couleur_fond_biome=None):
         W, H, F = config.LARGEUR, config.HAUTEUR, config.FOCALE
         rect = pygame.draw.rect
 
@@ -109,8 +109,9 @@ class Ciel:
         tan_p = config.SIN_PITCH / config.COS_PITCH
         hy = int(max(-10000, min(10000, H * 0.5 - tan_p * F)))
 
-        # 1) dégradé du ciel en bandes
-        surf.fill(self.couleur_haut)
+        # 1) dégradé du ciel en bandes (utilise la couleur du biome si fournie, sinon le haut par défaut)
+        couleur_fond = couleur_fond_biome if couleur_fond_biome is not None else self.couleur_haut
+        surf.fill(couleur_fond)
         for i, col in enumerate(self.bandes):
             bas = hy - i * HAUTEUR_BANDE
             haut = bas - HAUTEUR_BANDE

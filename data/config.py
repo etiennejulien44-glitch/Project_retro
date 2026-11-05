@@ -46,8 +46,8 @@ TERRAIN_LOIN = (34, 4, 70)
 # ---------------------------------------------------------------------------
 # GAMEPLAY : joueur & armes
 # ---------------------------------------------------------------------------
-JOUEUR_PV_MAX_BASE = 100         # valeur de référence (ne pas modifier en jeu)
-JOUEUR_PV_MAX = JOUEUR_PV_MAX_BASE  # valeur courante, recalculée par les boosts
+JOUEUR_PV_MAX_BASE = 100
+JOUEUR_PV_MAX = JOUEUR_PV_MAX_BASE
 CHARGEUR_TAILLE = 15
 MUNITIONS_RESERVE_DEPART = 45
 MUNITIONS_RESERVE_MAX = 120
@@ -56,7 +56,6 @@ CADENCE_TIR = 0.18
 DEGATS_TIR = 1
 PORTEE_TIR = DIST_AFFICHAGE_MAX
 
-# Butin laissé par les monstres tués
 PACK_MUNITIONS = 15
 PACK_SOIN = 25
 DROP_MUNITIONS = 0.45
@@ -87,9 +86,8 @@ PROJECTILE_VIE = 4.0
 PROJECTILE_RAYON = 40
 
 # ---------------------------------------------------------------------------
-# BUTINS / BOOSTS (coffres)
+# BUTINS / BOOSTS
 # ---------------------------------------------------------------------------
-# Taux (poids relatifs)
 POIDS_CS_MUNITIONS   = 40
 POIDS_CS_SOIN        = 35
 POIDS_CS_VIE_V       = 20
@@ -101,21 +99,75 @@ POIDS_PS_SAUT_J      = 22
 POIDS_PS_DEGATS_J    = 21
 POIDS_PS_AUTOREGEN_R = 5
 
-# Force des boosts
-FORCE_VIE_V     = 0.03
-FORCE_VIE_B     = 0.06
-FORCE_VIE_J     = 0.10
-FORCE_VITESSE_J = 0.08
-FORCE_SAUT_J    = 0.06
-FORCE_DEGATS_J  = 0.05
+FORCE_VIE_V     = 0.10       # +10% au lieu de 3%
+FORCE_VIE_B     = 0.20       # +20%
+FORCE_VIE_J     = 0.35       # +35%
+FORCE_VITESSE_J = 0.15       # +15%
+FORCE_SAUT_J    = 0.12       # +12%
+FORCE_DEGATS_J  = 0.25       # +25%  ← 4 boosts suffisent pour passer de 1 à 2 dégâts
 AUTOREGEN_PV    = 1
 AUTOREGEN_DELAI = 2.0
 
-# Caps (cumul additif)
-CAP_VITESSE = 0.32
-CAP_SAUT    = 0.24
-CAP_DEGATS  = 0.25
+CAP_VITESSE = 2           # laisse 3 boosts avant plafond
+CAP_SAUT    = 0.36
+CAP_DEGATS  = 0.75 
 
+#rammasage des boostes
+RAYON_AIMANT_BUTINS = 200
+VITESSE_AIMANT_BUTINS = 900
+RAYON_RAMASSAGE_BUTINS = 40
+
+# ---------------------------------------------------------------------------
+# BOSS — SPIDER BOSS
+# ---------------------------------------------------------------------------
+# Apparition
+BOSS_SPAWN_KILLS_1       = 15      # premier spawn à ce nombre de kills
+BOSS_SPAWN_KILLS_INCREMENT = 25    # kills supplémentaires pour le suivant
+BOSS_SPAWN_DISTANCE      = 700     # distance de spawn (unités monde)
+BOSS_SPAWN_ANIM_DUREE    = 2.0     # durée de la barre qui se remplit
+BOSS_HAUTEUR_CENTRE      = 100     # hauteur du centre du boss (visée)
+BOSS_OFFSET_MODELE       = -60     # offset vertical du modèle (à ajuster)
+
+# Stats de base (niveau 0)
+BOSS_PV               = 300
+BOSS_VITESSE          = 180
+BOSS_DEGATS_CONTACT   = 20
+BOSS_AGGRO            = 2500
+BOSS_PORTEE_CONTACT   = 120
+
+# Scaling à chaque respawn
+BOSS_PV_MULT          = 1.50
+BOSS_VITESSE_MULT     = 1.15
+BOSS_DEGATS_MULT      = 1.30
+
+# Pattern CHARGE (dès phase 1)
+BOSS_COOLDOWN_CHARGE     = 3.5
+BOSS_CHARGE_DUREE        = 1.2
+BOSS_CHARGE_VITESSE_MULT = 3.0
+BOSS_COOLDOWN_CONTACT    = 1.0
+
+# Pattern SAUT AOE (phase 2)
+BOSS_COOLDOWN_SAUT    = 5.0
+BOSS_SAUT_DUREE       = 1.0
+BOSS_SAUT_HAUTEUR     = 300
+BOSS_SAUT_RAYON_AOE   = 200
+BOSS_SAUT_DEGATS_AOE  = 25
+
+# Pattern RAFALE (phase 3)
+BOSS_COOLDOWN_RAFALE      = 4.0
+BOSS_RAFALE_NB_PROJ       = 5
+BOSS_RAFALE_ANGLE         = 45      # degrés d'éventail
+BOSS_PROJECTILE_VITESSE   = 380
+BOSS_PROJECTILE_DEGATS    = 12
+BOSS_PROJECTILE_VIE       = 5.0
+
+# Seuils de phase (fraction HP)
+BOSS_PHASE_2 = 0.66
+BOSS_PHASE_3 = 0.33
+
+# Drop
+BOSS_NB_DROPS     = 2
+BOSS_DROPS_POOL   = ["VIE_J", "VITESSE_J", "SAUT_J", "DEGATS_J", "AUTO_REGEN_R"]
 
 def mettre_a_jour_rayons():
     global COS_YAW, SIN_YAW, COS_PITCH, SIN_PITCH

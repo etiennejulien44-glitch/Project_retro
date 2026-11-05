@@ -1,21 +1,19 @@
-# entity.py  --  joueur, ennemis (IA), projectiles, butin, tir
+# world/entity.py
 import math
 import random
 import time
 import numpy as np
-import config
-from terrain import get_hauteur_sol, monstres_caches
-from renderer import projeter_3d_masse
+from data import config
+from world import boss as boss_module
+from .terrain import get_hauteur_sol, monstres_caches
+from engine.renderer import projeter_3d_masse
 
 projectiles = []
-pickups = []       # [x, z, type, spawn_time]   type 0=mun, 1=soin
+pickups = []       # [x, z, type, spawn_time]
 
-DELAI_RAMASSAGE = 0.6   # secondes avant qu'un pickup puisse être ramassé
+DELAI_RAMASSAGE = 0.6
 
 
-# ---------------------------------------------------------------------------
-# Joueur
-# ---------------------------------------------------------------------------
 class Joueur:
     def __init__(self):
         self.reinitialiser()
@@ -56,7 +54,13 @@ class Joueur:
         self.pv = min(config.JOUEUR_PV_MAX, self.pv + n)
 
     def ajouter_munitions(self, n):
-        self.reserve = min(config.MUNITIONS_RESERVE_MAX, self.reserve + n)
+        place_reserve = config.MUNITIONS_RESERVE_MAX - self.reserve
+        ajout = min(n, place_reserve)
+        self.reserve += ajout
+        reste = n - ajout
+        if reste > 0:
+            place_chargeur = config.CHARGEUR_TAILLE - self.chargeur
+            self.chargeur += min(reste, place_chargeur)
 
     def lancer_recharge(self):
         if (self.mort or self.t_recharge > 0 or self.reserve <= 0
@@ -100,9 +104,6 @@ def reinitialiser_entites():
     pickups.clear()
 
 
-# ---------------------------------------------------------------------------
-# Ligne de vue
-# ---------------------------------------------------------------------------
 def ligne_de_vue(x0, y0, z0, x1, y1, z1, n=14):
     t = np.linspace(0.05, 0.95, n)
     xs = x0 + (x1 - x0) * t
@@ -112,9 +113,6 @@ def ligne_de_vue(x0, y0, z0, x1, y1, z1, n=14):
     return not np.any(ys > sol - 3)
 
 
-# ---------------------------------------------------------------------------
-# Butin (drops de monstres)
-# ---------------------------------------------------------------------------
 def deposer_butin(x, z):
     r = random.random()
     t = time.time()
@@ -126,32 +124,46 @@ def deposer_butin(x, z):
         pickups.pop(0)
 
 
-def mettre_a_jour_pickups(joueur):
+def mettre_a_jour_pickups(joueur, dt):
     if joueur.mort:
         return
     now = time.time()
     restants = []
     for p in pickups:
         if now - p[3] < DELAI_RAMASSAGE:
-            restants.append(p)      # période de grâce (visibilité)
-            continue
-        proche = math.hypot(p[0] - config.cam_x, p[1] - config.cam_z) < config.RAYON_RAMASSAGE
-        if proche and p[2] == 0:
-            joueur.ajouter_munitions(config.PACK_MUNITIONS)
-            joueur.dire(f"+{config.PACK_MUNITIONS} MUNITIONS")
-        elif proche and p[2] == 1 and joueur.pv < config.JOUEUR_PV_MAX:
-            joueur.soigner(config.PACK_SOIN)
-            joueur.dire(f"+{config.PACK_SOIN} PV")
-        else:
             restants.append(p)
+            continue
+        d = math.hypot(p[0] - config.cam_x, p[1] - config.cam_z)
+
+        if d < config.RAYON_RAMASSAGE_BUTINS:
+            if p[2] == 0:
+                if joueur.reserve >= config.MUNITIONS_RESERVE_MAX:
+                    continue
+                avant = joueur.reserve
+                joueur.ajouter_munitions(config.PACK_MUNITIONS)
+                joueur.dire(f"MUNITIONS {avant}->{joueur.reserve}")
+            elif p[2] == 1:
+                if joueur.pv >= config.JOUEUR_PV_MAX:
+                    restants.append(p)
+                    continue
+                avant = joueur.pv
+                joueur.soigner(config.PACK_SOIN)
+                joueur.dire(f"SOIN {avant}->{joueur.pv}")
+            continue
+
+        if d < config.RAYON_AIMANT_BUTINS:
+            step = config.VITESSE_AIMANT_BUTINS * dt
+            if step > d:
+                step = d
+            p[0] += (config.cam_x - p[0]) / d * step
+            p[1] += (config.cam_z - p[1]) / d * step
+
+        restants.append(p)
     pickups[:] = restants
 
 
-# ---------------------------------------------------------------------------
-# IA ennemis
-# ---------------------------------------------------------------------------
 def _hauteur_centre(m):
-    return get_hauteur_sol(m.x, m.z) + (-15 if m.tipo == 0 else -65)
+    return get_hauteur_sol(m.x, m.z) + m.data.get("hauteur_centre", -20)
 
 
 def mettre_a_jour_monstres(dt, cles, joueur, temps):
@@ -163,25 +175,27 @@ def mettre_a_jour_monstres(dt, cles, joueur, temps):
             d = math.hypot(dx, dz)
 
             if m.tipo == 0:
-                if d >= config.ARAIGNEE_AGGRO:
+                if d >= m.data["aggro"]:
                     continue
-                if d > config.ARAIGNEE_PORTEE:
-                    m.x += dx / d * config.ARAIGNEE_VITESSE * dt
-                    m.z += dz / d * config.ARAIGNEE_VITESSE * dt
+                if d > m.data["portee"]:
+                    m.x += dx / d * m.data["vitesse"] * dt
+                    m.z += dz / d * m.data["vitesse"] * dt
                     m.cd = max(m.cd, 0.4)
                 else:
                     m.cd -= dt
                     if m.cd <= 0:
-                        joueur.prendre_degats(config.ARAIGNEE_DEGATS)
-                        m.cd = config.ARAIGNEE_COOLDOWN
+                        joueur.prendre_degats(m.data["degats"])
+                        m.cd = m.data["cooldown"]
             else:
-                if d >= config.DRONE_AGGRO or d < 1e-6:
+                if d >= m.data["aggro"] or d < 1e-6:
                     continue
-                v = config.DRONE_VITESSE * dt
-                if d > config.DRONE_DIST_PREF + 80:
+                v = m.data["vitesse"] * dt
+                dist_pref = m.data.get("dist_pref", 80.0)
+
+                if d > dist_pref + 80:
                     m.x += dx / d * v
                     m.z += dz / d * v
-                elif d < config.DRONE_DIST_PREF - 150:
+                elif d < dist_pref - 150:
                     m.x -= dx / d * v
                     m.z -= dz / d * v
                 lat = math.sin(temps * 0.8 + m.phase) * v * 0.7
@@ -189,9 +203,10 @@ def mettre_a_jour_monstres(dt, cles, joueur, temps):
                 m.z += dx / d * lat
 
                 m.cd -= dt
-                if m.cd <= 0 and d < config.DRONE_PORTEE_TIR and not joueur.mort:
+                portee_maximale = m.data.get("portee_tir", 150.0)
+                if m.cd <= 0 and d < portee_maximale and not joueur.mort:
                     _tirer_projectile(m)
-                    m.cd = config.DRONE_COOLDOWN + random.random() * 0.8
+                    m.cd = m.data["cooldown"] + random.random() * 0.8
 
 
 def _tirer_projectile(m):
@@ -220,38 +235,66 @@ def mettre_a_jour_projectiles(dt, joueur):
     projectiles[:] = vivants
 
 
-# ---------------------------------------------------------------------------
-# Tir joueur
-# ---------------------------------------------------------------------------
 def tirer_laser(cles, joueur):
+    cx, cy = config.LARGEUR // 2, config.HAUTEUR // 2
+    candidats = []
+
+    b = boss_module.boss
+    if b is not None and not b.en_spawn and b.invuln <= 0:
+        bx = b.x
+        by = get_hauteur_sol(b.x, b.z) - config.BOSS_HAUTEUR_CENTRE
+        bz = b.z
+        pos = np.array([[bx, by, bz]], dtype=np.float32)
+        ex, ey, rz, v = projeter_3d_masse(pos)
+        if v[0] and rz[0] < config.PORTEE_TIR:
+            rayon_screen = config.BOSS_HAUTEUR_CENTRE * config.FOCALE / max(rz[0], 1.0)
+            rayon_screen = min(rayon_screen, 250.0)
+            if math.hypot(int(ex[0]) - cx, int(ey[0]) - cy) < rayon_screen:
+                if ligne_de_vue(config.cam_x, config.cam_y, config.cam_z, bx, by, bz):
+                    candidats.append({
+                        "type": "boss", "obj": b,
+                        "ex": int(ex[0]), "ey": int(ey[0]), "rz": float(rz[0]),
+                    })
+
     mons = [m for cle in cles for m in monstres_caches[cle]]
-    if not mons:
+    if mons:
+        pos = np.array([[m.x, _hauteur_centre(m), m.z] for m in mons], dtype=np.float32)
+        ex, ey, rz, v = projeter_3d_masse(pos)
+        for i, m in enumerate(mons):
+            if not v[i] or rz[i] >= config.PORTEE_TIR:
+                continue
+            rayon_screen = 40.0 * config.FOCALE / max(rz[i], 1.0)
+            rayon_screen = max(rayon_screen, 22.0)
+            if math.hypot(int(ex[i]) - cx, int(ey[i]) - cy) < rayon_screen:
+                if ligne_de_vue(config.cam_x, config.cam_y, config.cam_z,
+                                float(pos[i][0]), float(pos[i][1]), float(pos[i][2])):
+                    candidats.append({
+                        "type": "monstre", "obj": m,
+                        "ex": int(ex[i]), "ey": int(ey[i]), "rz": float(rz[i]),
+                    })
+
+    if not candidats:
         return None, False, False
 
-    pos = np.array([[m.x, _hauteur_centre(m), m.z] for m in mons], dtype=np.float32)
-    ex, ey, rz, v = projeter_3d_masse(pos)
-    cx, cy = config.LARGEUR // 2, config.HAUTEUR // 2
-    dist = np.hypot(ex - cx, ey - cy)
-    rayon = np.maximum(22.0, 30.0 * config.FOCALE / np.maximum(rz, 1.0))
-    candidats = np.nonzero(v & (dist < rayon) & (rz < config.PORTEE_TIR))[0]
+    c = min(candidats, key=lambda x: x["rz"])
 
-    for i in sorted(candidats.tolist(), key=lambda k: rz[k]):
-        m = mons[i]
-        if not ligne_de_vue(config.cam_x, config.cam_y, config.cam_z,
-                            float(pos[i][0]), float(pos[i][1]), float(pos[i][2])):
-            continue
-        m.hp -= config.DEGATS_TIR
-        m.hit = 0.12
-        fin = (int(ex[i]), int(ey[i]))
-        if m.hp <= 0:
-            for cle in cles:
-                if m in monstres_caches[cle]:
-                    monstres_caches[cle].remove(m)
-                    break
-            joueur.kills += 1
-            joueur.t_kill = 0.25
-            deposer_butin(m.x, m.z)
-            return fin, True, True
+    if c["type"] == "boss":
+        boss_module.toucher_boss(config.DEGATS_TIR)
         joueur.t_hit = 0.15
-        return fin, True, False
-    return None, False, False
+        return (c["ex"], c["ey"]), True, False
+
+    m = c["obj"]
+    m.hp -= config.DEGATS_TIR
+    m.hit = 0.12
+    fin = (c["ex"], c["ey"])
+    if m.hp <= 0:
+        for cle in cles:
+            if m in monstres_caches[cle]:
+                monstres_caches[cle].remove(m)
+                break
+        joueur.kills += 1
+        joueur.t_kill = 0.25
+        deposer_butin(m.x, m.z)
+        return fin, True, True
+    joueur.t_hit = 0.15
+    return fin, True, False

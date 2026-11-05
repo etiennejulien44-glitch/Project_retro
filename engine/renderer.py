@@ -1,6 +1,6 @@
 # renderer.py
 import numpy as np
-import config
+from data import config
 
 
 # =============================================================
