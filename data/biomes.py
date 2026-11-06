@@ -16,7 +16,7 @@ BIOMES = {
         "eval_hauteur": 5.0,
         "type_relief": "lisse",          # Relief vagues douces
         "decors": {"arbre": 2, "bloc_data": 3},
-        "poids_coffres": {"classique": 0.85, "prismatique": 0.15},
+        "poids_coffres": {"classique": 0.85, "prismatique": 0.15, "military": 0.2},
         "monstres_spawn": ["araignee", "drone"],
         "couleur_grille": (255, 0, 128),
         "couleur_brouillard": (20, 0, 40),
@@ -76,7 +76,7 @@ BIOMES = {
         "eval_hauteur": 11.0,
         "type_relief": "abrupte",
         "decors": {"obelisque": 3, "cristal": 6},
-        "poids_coffres": {"classique": 0.5, "prismatique": 0.50},
+        "poids_coffres": {"classique": 0.5, "prismatique": 0.50, "military": 0.2},
         "monstres_spawn": ["glitch", "tourelle", "drone"],
         "couleur_grille": (0, 255, 100),
         "couleur_brouillard": (0, 12, 6),

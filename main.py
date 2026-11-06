@@ -22,7 +22,7 @@ from world import entity, ciel, terrain
 from world.entity import Joueur
 from world.ciel import Ciel
 from world import boss as boss_module
-from data import armes
+from data import equipements
 from data.decors import DECORS
 from world.terrain import (
     get_hauteur_sol, get_zone, reinitialiser_monde,
@@ -580,7 +580,7 @@ class Jeu:
         self.reinitialiser()
 
     def reinitialiser(self):
-        armes.reinitialiser()
+        equipements.reinitialiser()
         reinitialiser_monde()
         entity.reinitialiser_entites()
         boosts.vider_butins()
@@ -636,7 +636,7 @@ class Jeu:
         """Appelé après equip / set : adapte chargeur et recharge en cours à l'arme."""
         j = self.joueur
         j.chargeur = min(j.chargeur, config.CHARGEUR_TAILLE)
-        self.popup_text = f"ARME : {armes.ARMES[armes.equipee]['nom']}"
+        self.popup_text = f"ARME : {equipements.ARMES[equipements.equipee]['nom']}"
         self.popup_color = (0, 255, 255)
         self.popup_timer = 2.0
 
@@ -778,7 +778,7 @@ class Jeu:
 # ---------------------------------------------------------------------------
 def main():
     pygame.init()
-    fenetre = pygame.display.set_mode((config.LARGEUR, config.HAUTEUR))
+    fenetre = pygame.display.set_mode((config.LARGEUR, config.HAUTEUR), pygame.RESIZABLE)
     pygame.display.set_caption("FPS Rétro Synthwave")
     horloge = pygame.time.Clock()
     pygame.mouse.set_visible(False)

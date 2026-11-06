@@ -21,7 +21,7 @@ import numpy as np
 from . import config
 from .modeles import MODELE_MUNITIONS, MODELE_SOINS
 from .coffres import COFFRES
-from . import armes
+from . import equipements
 
 
 # =============================================================

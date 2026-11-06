@@ -1,6 +1,6 @@
 # ui/terminal.py
 import pygame
-from data import armes
+from data import equipements
 
 class TerminalInventory:
     def __init__(self):
@@ -9,14 +9,14 @@ class TerminalInventory:
         self.history = []
         self.history_index = 0
         self.input_text = ""
-        self.jeu = None          # branché par Jeu : sert à synchroniser l'arme équipée
+        self.jeu = None          # branché par Jeu : sert à synchroniser l'équipement
         
         # Faux système de fichiers complet
         self.fs = {
             "home": {
                 "type": "dir",
                 "contents": {
-                    "inventory": {"type": "dir", "contents": {}},   # généré depuis data/armes.py
+                    "inventory": {"type": "dir", "contents": {}},   # généré depuis data/equipements.py
                     "option": {
                         "type": "dir",
                         "contents": {
@@ -41,7 +41,11 @@ class TerminalInventory:
 
     def get_current_dir_obj(self):
         if self.current_path == ["home", "inventory"]:
-            return {aid: {"type": "item", "size": armes.ARMES[aid]["taille"]} for aid in armes.possedees}
+            # Récupère dynamiquement la liste et la taille depuis possedees
+            return {
+                item_id: {"type": item_data["type"], "size": item_data["taille"]} 
+                for item_id, item_data in equipements.possedees.items()
+            }
         curr = self.fs
         for p in self.current_path:
             curr = curr[p]["contents"]
@@ -49,42 +53,54 @@ class TerminalInventory:
 
     def _sync(self):
         if self.jeu is not None:
-            self.jeu.synchroniser_arme()
+            if hasattr(self.jeu, "synchroniser_equipement"):
+                self.jeu.synchroniser_equipement()
+            elif hasattr(self.jeu, "synchroniser_arme"):
+                self.jeu.synchroniser_arme()
 
-    def _cmd_arme(self, cmd, args):
+    def _cmd_equipement(self, cmd, args):
         L = self.output_logs
         if cmd == "cat":
-            if not args or args[0] not in armes.possedees:
-                L.append("cat: usage  cat <arme>   (ls dans inventory pour la liste)")
+            if not args or args[0] not in equipements.possedees:
+                L.append("cat: usage  cat <item_id>   (ls dans inventory pour la liste)")
                 return
-            a = args[0]
-            L.append(f"{armes.ARMES[a]['nom']}  [{'EQUIPEE' if a == armes.equipee else 'range'}]")
-            for st, v in armes.possedees[a].items():
-                base = armes.ARMES[a]["stats"][st]
-                L.append(f"   {st:9s} = {v}" + ("" if v == base else f"   (base {base})"))
+            item_id = args[0]
+            item = equipements.possedees[item_id]
+            
+            # Vérification de l'équipement dans l'un des slots
+            est_equipe = "EQUIPE" if item_id in equipements.equipees.values() else "range"
+            L.append(f"{item['nom']} [{item['type']}] ({item['rarete'].upper()}) - {'[' + est_equipe + ']'}")
+            
+            for st, v in item["stats"].items():
+                L.append(f"   {st:18s} = {v}")
+
         elif cmd == "equip":
-            if args and armes.equiper(args[0]):
+            if args and equipements.equiper(args[0]):
                 self._sync()
-                L.append(f"{args[0]} équipée.")
+                slot = equipements.possedees[args[0]]["type"]
+                L.append(f"{args[0]} équipée dans le slot [{slot}].")
             else:
-                L.append("equip: usage  equip <arme>   (arme possédée)")
+                L.append("equip: usage  equip <item_id>   (item possédé)")
+
         elif cmd == "set":
             if len(args) != 3:
-                L.append("set: usage  set <arme> <stat> <valeur>   stats: " + ", ".join(armes.BORNES))
+                stats_bornes = ", ".join(equipements.BORNES_ARMES.keys())
+                L.append(f"set: usage  set <item_id> <stat> <valeur> (ex stats arme: {stats_bornes})")
                 return
             try:
-                ok, msg = armes.modifier(args[0], args[1], float(args[2]))
+                ok, msg = equipements.modifier(args[0], args[1], float(args[2]))
             except ValueError:
                 ok, msg = False, "valeur invalide"
             L.append(msg)
             if ok:
                 self._sync()
+
         elif cmd == "reset":
-            if args and armes.reset_arme(args[0]):
+            if args and equipements.reset_item(args[0]):
                 self._sync()
-                L.append(f"{args[0]} remise aux stats d'origine.")
+                L.append(f"{args[0]} remis aux stats d'origine.")
             else:
-                L.append("reset: usage  reset <arme>")
+                L.append("reset: usage  reset <item_id>")
 
     def handle_event(self, event):
         if event.type == pygame.KEYDOWN:
@@ -132,10 +148,11 @@ class TerminalInventory:
                 if data["type"] == "dir":
                     self.output_logs.append(f"  [DIR]  {name}/")
                 else:
-                    self.output_logs.append(f"         {name} ---- {data['size']}")
+                    self.output_logs.append(f"  [{data['type']:9s}] {name} ---- {data['size']}")
             
             if "inventory" in self.current_path:
-                self.output_logs.append(f"  équipée : {armes.equipee}")
+                slots_str = ", ".join([f"{slot}:{iid or 'vide'}" for slot, iid in equipements.equipees.items()])
+                self.output_logs.append(f"  équipés : {slots_str}")
         
         elif cmd == "cd":
             if not args or args[0] == "~":
@@ -154,12 +171,12 @@ class TerminalInventory:
                     self.output_logs.append(f"cd: dossier introuvable : {target}")
         
         elif cmd in ("cat", "equip", "set", "reset"):
-            self._cmd_arme(cmd, args)
+            self._cmd_equipement(cmd, args)
 
         elif cmd == "help" or "-h" in args:
             self.output_logs.append("ls, cd <dir>, cd .., clear, exit")
-            self.output_logs.append("Armes (cd inventory) : cat <arme>, equip <arme>,")
-            self.output_logs.append("   set <arme> <stat> <valeur>, reset <arme>")
+            self.output_logs.append("Equipements (cd inventory) : cat <item_id>, equip <item_id>,")
+            self.output_logs.append("   set <item_id> <stat> <valeur>, reset <item_id>")
         
         elif cmd == "clear":
             self.output_logs.clear()
@@ -172,27 +189,21 @@ class TerminalInventory:
     def dessiner(self, surface, font):
         largeur_ecran, hauteur_ecran = surface.get_size()
         
-        # Surface 1/4 de l'écran (moitié de la largeur, moitié de la hauteur)
         w = largeur_ecran // 2
         h = hauteur_ecran // 2
         
-        # Placement en bas à droite
         x = largeur_ecran - w - 20
         y = hauteur_ecran - h - 20
 
         term_surf = pygame.Surface((w, h), pygame.SRCALPHA)
         term_surf.fill((10, 0, 20, 245))
         
-        # Bordure Cyan Fluo
         pygame.draw.rect(term_surf, (0, 255, 255), term_surf.get_rect(), 2)
-        
-        # Barre de titre Magenta
         pygame.draw.rect(term_surf, (255, 0, 127), (0, 0, w, 24))
         title_font = pygame.font.SysFont(None, 20)
         title_surf = title_font.render("TERMINAL - BASH V1.08 [SYSTEM PAUSE]", True, (255, 255, 255))
         term_surf.blit(title_surf, (10, 4))
         
-        # Affichage des logs
         y_offset = 30
         max_lines = (h - 60) // 18
         visible_logs = self.output_logs[-max_lines:]
@@ -211,7 +222,6 @@ class TerminalInventory:
             term_surf.blit(log_surf, (10, y_offset))
             y_offset += 18
         
-        # Ligne d'invite de commande
         prompt_str = f"@user/{'/'.join(self.current_path)}~bash$> {self.input_text}_"
         input_surf = font.render(prompt_str, True, (255, 0, 127))
         term_surf.blit(input_surf, (10, h - 25))

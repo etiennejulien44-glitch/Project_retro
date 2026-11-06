@@ -22,7 +22,7 @@ COFFRES = {
     },
     "military": {
         "modele": PRISMATIC_CHEST, "echelle": 1.2,
-        "couleur": (255, 25, 25), "couleur_pulse": (200, 150, 255),
+        "couleur": (255, 0, 120), "couleur_pulse": (231, 0, 255),
         "couleur_ouvert": (0, 0, 0),
         "table": "military"
     }
