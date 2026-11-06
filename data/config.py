@@ -123,6 +123,7 @@ RAYON_RAMASSAGE_BUTINS = 40
 # Apparition
 BOSS_SPAWN_KILLS_1       = 15      # premier spawn à ce nombre de kills
 BOSS_SPAWN_KILLS_INCREMENT = 25    # kills supplémentaires pour le suivant
+BOSS_FINAL_PV_MULT      = 2.0     # boss final = spider boss x2 PV
 BOSS_SPAWN_DISTANCE      = 700     # distance de spawn (unités monde)
 BOSS_SPAWN_ANIM_DUREE    = 2.0     # durée de la barre qui se remplit
 BOSS_HAUTEUR_CENTRE      = 100     # hauteur du centre du boss (visée)

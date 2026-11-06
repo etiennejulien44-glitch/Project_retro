@@ -1,11 +1,12 @@
 # world/entity.py
+from data import boosts
 import math
 import random
 import time
 import numpy as np
 from data import config
 from world import boss as boss_module
-from .terrain import get_hauteur_sol, monstres_caches
+from .terrain import get_hauteur_sol, monstres_caches, bloque_point, bloque_segment
 from engine.renderer import projeter_3d_masse
 
 projectiles = []
@@ -110,21 +111,24 @@ def ligne_de_vue(x0, y0, z0, x1, y1, z1, n=14):
     zs = z0 + (z1 - z0) * t
     ys = y0 + (y1 - y0) * t
     sol = get_hauteur_sol(xs, zs)
-    return not np.any(ys > sol - 3)
+    return not np.any(ys > sol - 3) and not bloque_segment(x0, y0, z0, x1, y1, z1)
 
 
 def deposer_butin(x, z):
+    """Drop à la mort d'un monstre : tiré parmi les boosts qui ont un "pickup" (data/boosts.py)."""
     r = random.random()
     t = time.time()
-    if r < config.DROP_MUNITIONS:
-        pickups.append([x, z, 0, t])
-    elif r < config.DROP_MUNITIONS + config.DROP_SOIN:
-        pickups.append([x, z, 1, t])
+    acc = 0.0
+    for idx, def_id in enumerate(boosts.PICKUP_IDS):
+        acc += boosts.BOOSTS[def_id]["pickup"].get("drop", 0.0)
+        if r < acc:
+            pickups.append([x, z, idx, t])
+            break
     if len(pickups) > 80:
         pickups.pop(0)
 
 
-def mettre_a_jour_pickups(joueur, dt):
+def mettre_a_jour_pickups(joueur, dt, stats):
     if joueur.mort:
         return
     now = time.time()
@@ -136,19 +140,8 @@ def mettre_a_jour_pickups(joueur, dt):
         d = math.hypot(p[0] - config.cam_x, p[1] - config.cam_z)
 
         if d < config.RAYON_RAMASSAGE_BUTINS:
-            if p[2] == 0:
-                if joueur.reserve >= config.MUNITIONS_RESERVE_MAX:
-                    continue
-                avant = joueur.reserve
-                joueur.ajouter_munitions(config.PACK_MUNITIONS)
-                joueur.dire(f"MUNITIONS {avant}->{joueur.reserve}")
-            elif p[2] == 1:
-                if joueur.pv >= config.JOUEUR_PV_MAX:
-                    restants.append(p)
-                    continue
-                avant = joueur.pv
-                joueur.soigner(config.PACK_SOIN)
-                joueur.dire(f"SOIN {avant}->{joueur.pv}")
+            if not boosts.appliquer(boosts.PICKUP_IDS[int(p[2])], stats, joueur):
+                restants.append(p)        # plein : reste au sol
             continue
 
         if d < config.RAYON_AIMANT_BUTINS:
@@ -174,7 +167,7 @@ def mettre_a_jour_monstres(dt, cles, joueur, temps):
             dx, dz = cx - m.x, cz - m.z
             d = math.hypot(dx, dz)
 
-            if m.tipo == 0:
+            if m.data["comportement"] == "melee":
                 if d >= m.data["aggro"]:
                     continue
                 if d > m.data["portee"]:
@@ -225,7 +218,7 @@ def mettre_a_jour_projectiles(dt, joueur):
         p[1] += p[4] * dt
         p[2] += p[5] * dt
         p[6] -= dt
-        if p[6] <= 0 or p[1] > get_hauteur_sol(p[0], p[2]):
+        if p[6] <= 0 or p[1] > get_hauteur_sol(p[0], p[2]) or bloque_point(p[0], p[1], p[2]):
             continue
         dx, dy, dz = p[0] - config.cam_x, p[1] - config.cam_y, p[2] - config.cam_z
         if dx * dx + dy * dy + dz * dz < r2:

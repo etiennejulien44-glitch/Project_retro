@@ -1,5 +1,6 @@
 # ui/terminal.py
 import pygame
+from data import armes
 
 class TerminalInventory:
     def __init__(self):
@@ -8,20 +9,14 @@ class TerminalInventory:
         self.history = []
         self.history_index = 0
         self.input_text = ""
+        self.jeu = None          # branché par Jeu : sert à synchroniser l'arme équipée
         
         # Faux système de fichiers complet
         self.fs = {
             "home": {
                 "type": "dir",
                 "contents": {
-                    "inventory": {
-                        "type": "dir",
-                        "contents": {
-                            "weapon_1": {"size": "12MB", "type": "item", "desc": "Laser Blaster v1"},
-                            "weapon_2": {"size": "15MB", "type": "item", "desc": "Plasma Rifle"},
-                            "Armor_1":  {"size": "15MB", "type": "item", "desc": "Grid Shield Light"}
-                        }
-                    },
+                    "inventory": {"type": "dir", "contents": {}},   # généré depuis data/armes.py
                     "option": {
                         "type": "dir",
                         "contents": {
@@ -41,14 +36,55 @@ class TerminalInventory:
         
         self.output_logs = [
             "SYNTH_OS v1.08 - SECURE SHELL [SYSTEM PAUSE]",
-            "Commandes: 'ls', 'cd <dir>', 'cd ..', 'clear', 'exit'"
+            "Commandes: ls, cd, cat, equip, set, reset, clear, exit  (help)"
         ]
 
     def get_current_dir_obj(self):
+        if self.current_path == ["home", "inventory"]:
+            return {aid: {"type": "item", "size": armes.ARMES[aid]["taille"]} for aid in armes.possedees}
         curr = self.fs
         for p in self.current_path:
             curr = curr[p]["contents"]
         return curr
+
+    def _sync(self):
+        if self.jeu is not None:
+            self.jeu.synchroniser_arme()
+
+    def _cmd_arme(self, cmd, args):
+        L = self.output_logs
+        if cmd == "cat":
+            if not args or args[0] not in armes.possedees:
+                L.append("cat: usage  cat <arme>   (ls dans inventory pour la liste)")
+                return
+            a = args[0]
+            L.append(f"{armes.ARMES[a]['nom']}  [{'EQUIPEE' if a == armes.equipee else 'range'}]")
+            for st, v in armes.possedees[a].items():
+                base = armes.ARMES[a]["stats"][st]
+                L.append(f"   {st:9s} = {v}" + ("" if v == base else f"   (base {base})"))
+        elif cmd == "equip":
+            if args and armes.equiper(args[0]):
+                self._sync()
+                L.append(f"{args[0]} équipée.")
+            else:
+                L.append("equip: usage  equip <arme>   (arme possédée)")
+        elif cmd == "set":
+            if len(args) != 3:
+                L.append("set: usage  set <arme> <stat> <valeur>   stats: " + ", ".join(armes.BORNES))
+                return
+            try:
+                ok, msg = armes.modifier(args[0], args[1], float(args[2]))
+            except ValueError:
+                ok, msg = False, "valeur invalide"
+            L.append(msg)
+            if ok:
+                self._sync()
+        elif cmd == "reset":
+            if args and armes.reset_arme(args[0]):
+                self._sync()
+                L.append(f"{args[0]} remise aux stats d'origine.")
+            else:
+                L.append("reset: usage  reset <arme>")
 
     def handle_event(self, event):
         if event.type == pygame.KEYDOWN:
@@ -99,7 +135,7 @@ class TerminalInventory:
                     self.output_logs.append(f"         {name} ---- {data['size']}")
             
             if "inventory" in self.current_path:
-                self.output_logs.append("                         inventory: 42MB/4GO")
+                self.output_logs.append(f"  équipée : {armes.equipee}")
         
         elif cmd == "cd":
             if not args or args[0] == "~":
@@ -117,8 +153,13 @@ class TerminalInventory:
                 else:
                     self.output_logs.append(f"cd: dossier introuvable : {target}")
         
+        elif cmd in ("cat", "equip", "set", "reset"):
+            self._cmd_arme(cmd, args)
+
         elif cmd == "help" or "-h" in args:
-            self.output_logs.append("Commandes : ls, cd <dir>, cd .., clear, exit")
+            self.output_logs.append("ls, cd <dir>, cd .., clear, exit")
+            self.output_logs.append("Armes (cd inventory) : cat <arme>, equip <arme>,")
+            self.output_logs.append("   set <arme> <stat> <valeur>, reset <arme>")
         
         elif cmd == "clear":
             self.output_logs.clear()

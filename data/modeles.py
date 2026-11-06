@@ -171,3 +171,52 @@ def _croix(arm=14, ep=5, prof=4, cy=-25):
 
 MODELE_MUNITIONS = _octaedre()
 MODELE_SOINS = _croix()
+
+
+# =============================================================
+#  Générateurs de formes (y négatif = vers le haut)
+# =============================================================
+def _anneau(w, d, y):
+    x, z = w / 2, d / 2
+    p = [(-x, y, -z), (x, y, -z), (x, y, z), (-x, y, z)]
+    return [(p[i], p[(i + 1) % 4]) for i in range(4)]
+
+
+def _boite(w, h, d, y0=0.0, cloisons=0):
+    segs = _anneau(w, d, y0) + _anneau(w, d, y0 - h)
+    x, z = w / 2, d / 2
+    for px, pz in ((-x, -z), (x, -z), (x, z), (-x, z)):
+        segs.append(((px, y0, pz), (px, y0 - h, pz)))
+    for k in range(1, cloisons + 1):
+        segs += _anneau(w, d, y0 - h * k / (cloisons + 1))
+    return segs
+
+
+def _pointe(base, h, anneaux=1):
+    r = base / 2
+    p = [(-r, 0, -r), (r, 0, -r), (r, 0, r), (-r, 0, r)]
+    segs = [(p[i], p[(i + 1) % 4]) for i in range(4)] + [(q, (0, -h, 0)) for q in p]
+    for k in range(1, anneaux + 1):
+        f = 1 - k / (anneaux + 1)
+        segs += _anneau(base * f, base * f, -h * (k / (anneaux + 1)))
+    return segs
+
+
+def _octa(r, yc):
+    P = [(r, yc, 0), (-r, yc, 0), (0, yc, r), (0, yc, -r)]
+    haut, bas = (0, yc - r * 1.6, 0), (0, yc + r * 1.6, 0)
+    return [(P[i], P[(i + 1) % 4]) for i in (0, 2, 1, 3)] + [(q, haut) for q in P] + [(q, bas) for q in P]
+
+
+# --- Décors ---
+MODELE_BLOC = _boite(100, 100, 100, cloisons=1)
+MODELE_MONOLITHE = _boite(60, 300, 24, cloisons=2) + [((-30, -90, -12), (30, -130, 12)), ((-30, -190, 12), (30, -230, -12))]
+MODELE_MUR = _boite(170, 110, 24, cloisons=1) + [((-85, -110, 0), (-40, -70, 0)), ((20, -110, 0), (60, -60, 0))]
+MODELE_RACK = _boite(70, 190, 60, cloisons=7)
+MODELE_TOUR = _boite(40, 260, 40, cloisons=5) + _boite(70, 12, 70, y0=-90) + _boite(70, 12, 70, y0=-170)
+MODELE_OBELISQUE = _pointe(60, 450, anneaux=2)
+MODELE_CRISTAL = _octa(28, -28)
+
+# --- Monstres ---
+MODELE_TOURELLE = _boite(36, 10, 36) + _boite(24, 18, 24, y0=-10) + [((0, -19, 12), (0, -19, 42)), ((6, -19, 12), (6, -19, 42))]
+MODELE_GLITCH = _boite(16, 16, 16, y0=-4) + _boite(16, 16, 16, y0=-8) + [((-8, -20, -8), (-14, -34, -12)), ((8, -20, 8), (14, -34, 12))]

@@ -61,17 +61,8 @@ class HUD:
     def _dessiner_bonus(self, surf, stats):
         if stats is None:
             return
-        lignes = []
-        if stats.vie_max_pct > 0:
-            lignes.append((f"VIE MAX +{int(stats.vie_max_pct*100)}%", JAUNE))
-        if stats.vitesse_bonus > 0:
-            lignes.append((f"VITESSE +{int(stats.vitesse_bonus*100)}%", CYAN))
-        if stats.saut_bonus > 0:
-            lignes.append((f"SAUT +{int(stats.saut_bonus*100)}%", CYAN))
-        if stats.degats_bonus > 0:
-            lignes.append((f"DEGATS +{int(stats.degats_bonus*100)}%", ROSE))
-        if stats.auto_regen:
-            lignes.append(("REGEN 1 PV/2s", BLANC))
+        coul = {"JAUNE": JAUNE, "CYAN": CYAN, "ROSE": ROSE, "BLANC": BLANC}
+        lignes = [(t, coul[c]) for t, c in stats.lignes_hud()]
         x = config.LARGEUR - 24
         y = 22
         for txt, col in lignes:
@@ -162,3 +153,16 @@ class HUD:
         if math.sin(temps * 4) > -0.3:
             self._ecrire(surf, "[R] REJOUER      [ECHAP] QUITTER",
                          self.f_petit, BLANC, W // 2, H // 2 + 70, "c")
+
+    def dessiner_victoire(self, surf, j, temps, duree):
+        W, H = config.LARGEUR, config.HAUTEUR
+        surf.blit(self.voile, (0, 0))
+        self._ecrire(surf, "SYSTEME PURGE", self.f_grand, CYAN, W // 2 + 4, H // 2 - 116, "c")
+        self._ecrire(surf, "SYSTEME PURGE", self.f_grand, JAUNE, W // 2, H // 2 - 120, "c")
+        m, sec = int(duree // 60), int(duree % 60)
+        self._ecrire(surf, f"RUN TERMINEE  -  {m:02d}:{sec:02d}", self.f_moyen, BLANC, W // 2, H // 2 - 30, "c")
+        self._ecrire(surf, f"SCORE  {j.kills * 100 + 1000}   ({j.kills} ennemis)",
+                     self.f_moyen, JAUNE, W // 2, H // 2 + 20, "c")
+        if math.sin(temps * 4) > -0.3:
+            self._ecrire(surf, "[R] NOUVELLE RUN      [ECHAP] QUITTER",
+                         self.f_petit, BLANC, W // 2, H // 2 + 80, "c")

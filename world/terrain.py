@@ -3,11 +3,12 @@ import numpy as np
 import random
 import math
 from data import config
+from data.decors import DECORS
 from data.biomes import (BIOMES, COUCHES, NB_COUCHES, COUCHE_LARGEUR_REGIONS,
                          JITTER_FRONTIERE, CHANCE_VARIANTE, RAYON_COUCHE_0)
 from .monstre import Monstre
 
-arbres_caches = {}
+decors_caches = {}
 monstres_caches = {}
 chest_caches = {}
 
@@ -240,8 +241,8 @@ def _trouver_position_coffre(rand_gen, cx, cz, arbres, autres_coffres, marge, bi
 
 def get_elements_chunk(cx, cz):
     cle = (cx, cz)
-    if cle in arbres_caches and cle in monstres_caches and cle in chest_caches:
-        return arbres_caches[cle], monstres_caches[cle], chest_caches[cle]
+    if cle in decors_caches and cle in monstres_caches and cle in chest_caches:
+        return decors_caches[cle], monstres_caches[cle], chest_caches[cle]
 
     biome = get_biome_actuel(cx, cz)
 
@@ -253,19 +254,22 @@ def get_elements_chunk(cx, cz):
     taille = config.TAILLE_CHUNKS
     marge = max(1, min(2, taille // 4))
 
-    # ---------- Arbres (hauteur fixe par chunk) ----------
-    arbres_chunk = []
-    nb_arbres_max = biome["densite_arbres_max"]
-    if nb_arbres_max > 0:
-        for _ in range(nb_arbres_max):
+    # ---------- Décors (relief + couverts, définis par biome dans data/biomes.py) ----------
+    decors_chunk = []                       # (id, x, y, z)
+    for decor_id, nb in biome["decors"].items():
+        spec = DECORS[decor_id]
+        for _ in range(nb):
             for _ in range(10):
                 ax = (cx * taille + rng_arbre.randint(marge, taille - marge)) * config.ECHELLE_GRILLE
                 az = (cz * taille + rng_arbre.randint(marge, taille - marge)) * config.ECHELLE_GRILLE
-                if not any(math.hypot(ax - x, az - z) < 3.0 * config.ECHELLE_GRILLE for x, _, z in arbres_chunk):
-                    ay = float(get_hauteur_sol(ax, az, biome))
-                    arbres_chunk.append((ax, ay, az))
-                    break
-    arbres_caches[cle] = arbres_chunk
+                if any(math.hypot(ax - x, az - z) < spec["rayon"] + DECORS[i]["rayon"] + 40
+                       for i, x, _, z in decors_chunk):
+                    continue
+                ay = float(get_hauteur_sol(ax, az)) - spec["flottant"]
+                decors_chunk.append((decor_id, ax, ay, az))
+                break
+    decors_caches[cle] = decors_chunk
+    arbres_chunk = [(x, y, z) for _, x, y, z in decors_chunk]   # pour placer coffres / monstres
 
     # ---------- Coffres ----------
     chest_chunk = []
@@ -283,8 +287,12 @@ def get_elements_chunk(cx, cz):
         mx, mz = pos
         positions_chests.append((mx, mz))
 
-        is_prismatic = rng_coffre.random() < biome["chances_coffre_prismatique"]
-        type_coffre = "PRISMATIC_CHEST" if is_prismatic else "MODELE_CHEST"
+        poids = biome["poids_coffres"]
+        r_c = rng_coffre.random() * sum(poids.values())
+        for type_coffre, w_c in poids.items():
+            r_c -= w_c
+            if r_c <= 0:
+                break
 
         normale = _get_normale_sol(mx, mz, biome)
         y = float(get_hauteur_sol(mx, mz, biome))
@@ -321,7 +329,7 @@ def get_elements_chunk(cx, cz):
                 break
     monstres_caches[cle] = monstres_chunk
 
-    return arbres_caches[cle], monstres_caches[cle], chest_caches[cle]
+    return decors_caches[cle], monstres_caches[cle], chest_caches[cle]
 
 
 # =============================================================
@@ -330,6 +338,7 @@ def get_elements_chunk(cx, cz):
 
 _cache_geo_chunks = {}
 _zone_cache = {"cle": None, "zone": None}
+_etat = {"solides": np.empty((0, 4))}   # (x, z, rayon, y_sommet) des décors solides proches
 
 
 def _geo_chunk(cx, cz):
@@ -378,10 +387,14 @@ def get_zone(cam_cx, cam_cz, portee):
             chests.extend(chest_chunk)
             cles.append((cx, cz))
 
-    if arbres:
-        bases_arbres = np.array([(p[0], p[1], p[2]) for p in arbres], dtype=np.float32)
-    else:
-        bases_arbres = np.empty((0, 3), dtype=np.float32)
+    par_id, solides = {}, []
+    for did, x, y, z in arbres:
+        par_id.setdefault(did, []).append((x, y, z))
+        sp = DECORS[did]
+        if sp["solide"]:
+            solides.append((x, z, sp["rayon"], y - sp["hauteur"]))
+    bases_decors = {did: np.array(v, dtype=np.float32) for did, v in par_id.items()}
+    _etat["solides"] = np.array(solides, dtype=np.float64).reshape(-1, 4)
 
     bases_chests = [{
         "pos":      np.array([c["x"], c["y"], c["z"]], dtype=np.float32),
@@ -406,7 +419,7 @@ def get_zone(cam_cx, cam_cz, portee):
         "A": np.concatenate(A), "B": np.concatenate(B),
         "C": np.concatenate(C), "D": np.concatenate(D),
         "cles": cles,
-        "arbres": bases_arbres,
+        "decors": bases_decors,
         "chests": bases_chests,
         "couleur_grille": biome_courant["couleur_grille"],
         "couleur_brouillard": biome_courant["couleur_brouillard"],
@@ -430,8 +443,57 @@ def reinitialiser_monde(graine=None):
     _graine_monde = random.randrange(1 << 30) if graine is None else int(graine)
     _cache_regions.clear()
     _cache_geo_chunks.clear()
-    arbres_caches.clear()
+    _zone_cache["cle"] = None
+    _zone_cache["zone"] = None
+    _etat["solides"] = np.empty((0, 4))
+    decors_caches.clear()
     monstres_caches.clear()
     chest_caches.clear()
     _zone_cache["cle"] = None
     _zone_cache["zone"] = None
+
+
+# =============================================================
+#  Couverts : les décors solides bloquent le joueur, ses tirs et les tirs ennemis
+#  (y négatif = vers le haut : un point est sous le sommet si y > y_sommet)
+# =============================================================
+def bloque_point(x, y, z):
+    s = _etat["solides"]
+    if not len(s):
+        return False
+    d2 = (s[:, 0] - x) ** 2 + (s[:, 1] - z) ** 2
+    return bool(np.any((d2 < s[:, 2] ** 2) & (y > s[:, 3])))
+
+
+def bloque_segment(x0, y0, z0, x1, y1, z1):
+    s = _etat["solides"]
+    if not len(s):
+        return False
+    n = int(min(90, max(14, math.hypot(x1 - x0, z1 - z0) / 20)))
+    t = np.linspace(0.02, 0.98, n)[:, None]
+    xs = x0 + (x1 - x0) * t
+    zs = z0 + (z1 - z0) * t
+    ys = y0 + (y1 - y0) * t
+    d2 = (xs - s[:, 0]) ** 2 + (zs - s[:, 1]) ** 2
+    return bool(np.any((d2 < s[:, 2] ** 2) & (ys > s[:, 3])))
+
+
+def repousser(x, z, y_pied, marge=18.0):
+    """Empêche le joueur de traverser les décors solides."""
+    s = _etat["solides"]
+    for _ in range(2):
+        if not len(s):
+            break
+        dx, dz = x - s[:, 0], z - s[:, 1]
+        d = np.hypot(dx, dz)
+        lim = s[:, 2] + marge
+        m = (d < lim) & (y_pied > s[:, 3])
+        if not m.any():
+            break
+        i = int(np.argmax(np.where(m, lim - d, -1.0)))
+        if d[i] < 1e-3:
+            nx, nz = 1.0, 0.0
+        else:
+            nx, nz = dx[i] / d[i], dz[i] / d[i]
+        x, z = s[i, 0] + nx * lim[i], s[i, 1] + nz * lim[i]
+    return float(x), float(z)

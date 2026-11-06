@@ -12,9 +12,6 @@ Ver 0.0.1
     - Add 3DWIRE for creat wire modele in the game
 Ver 0.0.2
 
--Add things:
-    - Add many biome
-    - Add new spawn mecanique
-    - organization
-    - Found a Game aim
-Vers 0.0.3
+-Refactor: registres data-driven (bestiaire, biomes, boosts, coffres, pickups) -> 1 entrée = 1 ajout
+-Fix: pickup munitions ne disparait plus quand la réserve est pleine
+Ver 0.0.4

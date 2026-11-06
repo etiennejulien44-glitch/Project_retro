@@ -3,13 +3,15 @@ import math
 import random
 import numpy as np
 from data import config
-from .terrain import get_hauteur_sol
+from .terrain import get_hauteur_sol, bloque_point
 
 
 boss = None
 projectiles_boss = []     # [x, y, z, vx, vy, vz, duree, degats]
 bosses_vaincus = 0
 prochain_seuil_kills = config.BOSS_SPAWN_KILLS_1
+boss_final_lance = False     # le boss final apparait en atteignant la dernière couche
+run_gagnee = False           # True quand le boss final est vaincu -> fin de run
 
 
 class SpiderBoss:
@@ -17,6 +19,7 @@ class SpiderBoss:
         self.x = x
         self.z = z
         self.niveau = niveau
+        self.final = False
 
         mult_pv  = config.BOSS_PV_MULT      ** niveau
         mult_vit = config.BOSS_VITESSE_MULT ** niveau
@@ -73,6 +76,18 @@ def spawner_boss(joueur_x, joueur_z):
     return boss
 
 
+def lancer_boss_final(joueur_x, joueur_z):
+    """Boss de fin de run (même modèle que le spider boss, plus costaud). Appelé 1 seule fois."""
+    global boss, boss_final_lance
+    if boss_final_lance:
+        return False
+    boss_final_lance = True
+    b = spawner_boss(joueur_x, joueur_z)
+    b.final = True
+    b.hp_max = b.hp = int(b.hp_max * config.BOSS_FINAL_PV_MULT)
+    return True
+
+
 def toucher_boss(degats):
     """Appelé par le système de tir du joueur."""
     if boss is None or boss.invuln > 0:
@@ -84,7 +99,7 @@ def toucher_boss(degats):
 
 def _tuer_boss(joueur):
     global boss, bosses_vaincus, prochain_seuil_kills
-    import boosts
+    from data import boosts
     b = boss
     if b is None:
         return
@@ -99,7 +114,10 @@ def _tuer_boss(joueur):
             def_id,
         )
         boosts.spawner_butin(butin)
-    joueur.dire("BOSS VAINCU !")
+    global run_gagnee
+    if b.final:
+        run_gagnee = True
+    joueur.dire("BOSS FINAL VAINCU !" if b.final else "BOSS VAINCU !")
     boss = None
 
 
@@ -224,7 +242,7 @@ def mettre_a_jour_projectiles_boss(dt, joueur):
         p[1] += p[4] * dt
         p[2] += p[5] * dt
         p[6] -= dt
-        if p[6] <= 0 or p[1] > get_hauteur_sol(p[0], p[2]):
+        if p[6] <= 0 or p[1] > get_hauteur_sol(p[0], p[2]) or bloque_point(p[0], p[1], p[2]):
             continue
         dx, dy, dz = p[0] - config.cam_x, p[1] - config.cam_y, p[2] - config.cam_z
         if dx * dx + dy * dy + dz * dz < r2:
@@ -235,7 +253,9 @@ def mettre_a_jour_projectiles_boss(dt, joueur):
 
 
 def reinitialiser_boss():
-    global boss, bosses_vaincus, prochain_seuil_kills
+    global boss, bosses_vaincus, prochain_seuil_kills, boss_final_lance, run_gagnee
+    boss_final_lance = False
+    run_gagnee = False
     boss = None
     bosses_vaincus = 0
     prochain_seuil_kills = config.BOSS_SPAWN_KILLS_1

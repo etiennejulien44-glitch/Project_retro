@@ -14,7 +14,7 @@ class Monstre:
         self.data = BESTIAIRE[type_cle]
         
         # Rétrocompatibilité avec le moteur existant (tipo 0 ou 1)
-        self.tipo = self.data["tipo"]
+        self.tipo = list(BESTIAIRE).index(type_cle)
         
         self.hp_max = self.data["pv_max"]
         self.hp = self.hp_max

@@ -76,6 +76,11 @@ rendre le code plus simple est optimisée,
     inventory, option, sound
     ne pas oublier de mettre un -h pour les cmds
     
+
+    Pour coder un jeux effcacement 
+    -> boucle classique du jeux, moteur de jeux, rendu
+    -> pour rendre le jeux plus simple a coder et implémenter de nouveau élément générique -> trouver un moyen d automatiser !
+    
     
                 
 

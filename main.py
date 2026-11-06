@@ -9,7 +9,8 @@ import pygame
 
 # Fichiers situés dans le dossier 'data'
 from data import config, boosts, modeles
-from data.boosts import StatsBoostes, Butin, TypeBoost, Rarete
+from data.boosts import StatsBoostes, Butin, Rarete
+from data.coffres import COFFRES
 from data.modeles import (
     MODELE_ARBRE, MODELE_ARAIGNEE, MODELE_DRONE,
     MODELE_MUNITIONS, MODELE_SOINS,
@@ -21,6 +22,8 @@ from world import entity, ciel, terrain
 from world.entity import Joueur
 from world.ciel import Ciel
 from world import boss as boss_module
+from data import armes
+from data.decors import DECORS
 from world.terrain import (
     get_hauteur_sol, get_zone, reinitialiser_monde,
     monstres_caches, chest_caches
@@ -39,9 +42,6 @@ from ui.terminal import TerminalInventory
 # ---------------------------------------------------------------------------
 # Échelles / rendu
 # ---------------------------------------------------------------------------
-ECHELLE_ARBRE     = 4.0
-ECHELLE_ARAIGNEE  = 1.0
-ECHELLE_DRONE     = 1.0
 ECHELLE_PICKUP    = 3.0
 ECHELLE_CHEST     = 1.0
 ECHELLE_BUTIN     = 200.0
@@ -57,26 +57,27 @@ def _aplatir_modele(modele, echelle=1.0):
     P2 = np.array([l[1] for l in modele], dtype=np.float32) * echelle
     return P1, P2
 
-ARBRE_P1,    ARBRE_P2    = _aplatir_modele(MODELE_ARBRE,    ECHELLE_ARBRE)
-ARAIGNEE_P1, ARAIGNEE_P2 = _aplatir_modele(MODELE_ARAIGNEE, ECHELLE_ARAIGNEE)
-DRONE_P1,    DRONE_P2    = _aplatir_modele(MODELE_DRONE,    ECHELLE_DRONE)
-MUN_P1,      MUN_P2      = _aplatir_modele(MODELE_MUNITIONS, ECHELLE_PICKUP)
-SOIN_P1,     SOIN_P2     = _aplatir_modele(MODELE_SOINS,    ECHELLE_PICKUP)
-CHEST_P1,    CHEST_P2    = _aplatir_modele(MODELE_CHEST,      ECHELLE_CHEST)
-PRISMA_P1,   PRISMA_P2   = _aplatir_modele(PRISMATIC_CHEST,   ECHELLE_CHEST)
 PYR_P1,      PYR_P2      = _aplatir_modele(boosts.MODELE_PYRAMIDE, ECHELLE_BUTIN)
 BOSS_P1,     BOSS_P2     = _aplatir_modele(SPIDER_BOSS,      ECHELLE_BOSS)
 
-COULEUR_TRONC = (120, 70, 255)
-COULEUR_FEUILLES = (40, 240, 255)
-ARBRE_COULEURS = [COULEUR_TRONC if l[0][1] == 0 else COULEUR_FEUILLES for l in MODELE_ARBRE]
-COULEUR_ARAIGNEE = (255, 130, 30)
-COULEUR_DRONE = (255, 235, 70)
-COULEUR_MUNITIONS = (60, 240, 255)
-COULEUR_SOIN = (120, 255, 150)
+# Rendu des monstres : construit AUTOMATIQUEMENT depuis data/bestiaire.py
+from data.bestiaire import BESTIAIRE
+# Pickups (munitions, soin...) et coffres : AUTOMATIQUE depuis data/boosts.py et data/coffres.py
+PICKUPS_RENDU = {i: (*_aplatir_modele(boosts.BOOSTS[k]["pickup"]["modele"], boosts.BOOSTS[k]["pickup"]["echelle"]),
+                     boosts.BOOSTS[k]["pickup"]["couleur"])
+                 for i, k in enumerate(boosts.PICKUP_IDS)}
+def _couleurs_decor(spec):
+    seuil = -spec["hauteur"] / spec["echelle"] * 0.35
+    return [spec["couleur_2"] if max(a[1], b[1]) < seuil else spec["couleur"] for a, b in spec["modele"]]
+
+
+# Décors : AUTOMATIQUE depuis data/decors.py
+DECORS_RENDU = {did: (*_aplatir_modele(d["modele"], d["echelle"]), _couleurs_decor(d)) for did, d in DECORS.items()}
+COFFRES_RENDU = {cle: (*_aplatir_modele(d["modele"], d["echelle"]), d) for cle, d in COFFRES.items()}
+MONSTRES_RENDU = {cle: (*_aplatir_modele(d["modele"], d.get("echelle", 1.0)), d["couleur"])
+                  for cle, d in BESTIAIRE.items()}
+
 COULEUR_TOUCHE = (255, 255, 255)
-COULEUR_CHEST = (255, 210, 90)
-COULEUR_CHEST_OUVERT = (255, 255, 255)
 
 def _build_fog_lut():
     r0, g0, b0 = config.TERRAIN_PROCHE
@@ -186,7 +187,7 @@ def _segments_entites(bases, P1, P2, couleurs_seg=None, couleurs_inst=None):
 def _barre_vie(ex, ey, rz, m):
     frac = max(0.0, m.hp / m.hp_max)
     w = max(10.0, 12000.0 / rz)
-    haut = (42 if m.tipo == 0 else 98) * config.FOCALE / rz
+    haut = m.data["hauteur_barre"] * config.FOCALE / rz
     x0, x1 = int(ex - w), int(ex + w)
     y = int(ey - haut)
     xf = int(ex - w + 2 * w * frac)
@@ -307,13 +308,12 @@ def dessiner_barre_vie_boss(surf, temps):
 # Entités
 # ---------------------------------------------------------------------------
 def collecter_entites(zone, items, temps):
-    bases = zone["arbres"]
-    if len(bases):
+    for did, bases in zone["decors"].items():
         _, _, rz, v = projeter_3d_masse(bases)
         vis = np.nonzero(v)[0]
         if len(vis):
-            for segs, p in zip(_segments_entites(bases[vis], ARBRE_P1, ARBRE_P2, ARBRE_COULEURS),
-                               rz[vis].tolist()):
+            P1, P2, cols = DECORS_RENDU[did]
+            for segs, p in zip(_segments_entites(bases[vis], P1, P2, cols), rz[vis].tolist()):
                 if segs:
                     items.append((p - BIAIS_ENTITES, 1, segs, None))
 
@@ -321,17 +321,17 @@ def collecter_entites(zone, items, temps):
     if mons:
         xs = np.array([m.x for m in mons])
         zs = np.array([m.z for m in mons])
-        tipo = np.array([m.tipo for m in mons])
+        cles_m = np.array([m.type_cle for m in mons])
         phase = np.array([m.phase for m in mons])
-        araignee = tipo == 0
-        saut = np.where(araignee, np.sin(temps * 12 + phase) * 6, np.sin(temps * 6 + phase) * 15)
-        decal = np.where(araignee, 0.0, -40.0)
+        freq = np.array([m.data["anim_freq"] for m in mons])
+        amp = np.array([m.data["anim_amp"] for m in mons])
+        decal = np.array([m.data["decal_y"] for m in mons])
+        saut = np.sin(temps * freq + phase) * amp
         pos = np.column_stack((xs, get_hauteur_sol(xs, zs) + decal + saut, zs)).astype(np.float32)
         ex, ey, rz, v = projeter_3d_masse(pos)
 
-        for id_t, P1, P2, col in ((0, ARAIGNEE_P1, ARAIGNEE_P2, COULEUR_ARAIGNEE),
-                                  (1, DRONE_P1, DRONE_P2, COULEUR_DRONE)):
-            sel = np.nonzero(v & (tipo == id_t))[0]
+        for cle_m, (P1, P2, col) in MONSTRES_RENDU.items():
+            sel = np.nonzero(v & (cles_m == cle_m))[0]
             if not len(sel):
                 continue
             cols = [COULEUR_TOUCHE if mons[i].hit > 0 else col for i in sel.tolist()]
@@ -352,8 +352,7 @@ def collecter_entites(zone, items, temps):
                                arr[:, 1])).astype(np.float32)
         _, _, rz, v = projeter_3d_masse(pos)
         ang = temps * 2.0
-        for id_t, P1, P2, col in ((0, MUN_P1, MUN_P2, COULEUR_MUNITIONS),
-                                  (1, SOIN_P1, SOIN_P2, COULEUR_SOIN)):
+        for id_t, (P1, P2, col) in PICKUPS_RENDU.items():
             sel = np.nonzero(v & (arr[:, 2] == id_t))[0]
             if not len(sel):
                 continue
@@ -384,20 +383,15 @@ def collecter_coffres(zone, items, temps):
         for chest in chest_caches[cle]:
             pos = np.array([chest["x"], chest["y"], chest["z"]], dtype=np.float32)
             R = chest["rotation"]
-            is_prisma = chest["type"] == "PRISMATIC_CHEST"
-            ouvert = chest["ouvert"]
-
-            if ouvert:
-                P1, P2 = (PRISMA_P1, PRISMA_P2) if is_prisma else (CHEST_P1, CHEST_P2)
-                base = COULEUR_CHEST_OUVERT
-            elif is_prisma:
-                P1, P2 = PRISMA_P1, PRISMA_P2
-                puls = 0.55 + 0.45 * math.sin(
-                    temps * 5 + chest["x"] * 0.13 + chest["z"] * 0.07)
-                base = (int(180 * puls + 60), int(60 + 130 * puls), 255)
+            P1, P2, cdef = COFFRES_RENDU[chest["type"]]
+            if chest["ouvert"]:
+                base = cdef["couleur_ouvert"]
+            elif "couleur_pulse" in cdef:
+                puls = 0.55 + 0.45 * math.sin(temps * 5 + chest["x"] * 0.13 + chest["z"] * 0.07)
+                c0, c1 = cdef["couleur"], cdef["couleur_pulse"]
+                base = tuple(int(c0[i] + (c1[i] - c0[i]) * puls) for i in range(3))
             else:
-                P1, P2 = CHEST_P1, CHEST_P2
-                base = COULEUR_CHEST
+                base = cdef["couleur"]
 
             w1 = transformer_vertices_monde(R, pos, P1)
             w2 = transformer_vertices_monde(R, pos, P2)
@@ -581,15 +575,18 @@ class Jeu:
         self.font_popup = pygame.font.SysFont(None, 56)
         self.debug_stats = DEBUG_STATS
         self.terminal = TerminalInventory()
+        self.terminal.jeu = self
         self.en_inventaire = False
         self.reinitialiser()
 
     def reinitialiser(self):
+        armes.reinitialiser()
         reinitialiser_monde()
         entity.reinitialiser_entites()
         boosts.vider_butins()
         boss_module.reinitialiser_boss()
         self.stats = StatsBoostes()
+        self.temps_run = 0.0
         self.couche_max = 0          # couche la plus profonde atteinte (progression / boss)
         config.cam_x, config.cam_z = config.DEPART_X, config.DEPART_Z
         
@@ -622,6 +619,8 @@ class Jeu:
 
     def tirer(self):
         j = self.joueur
+        if boss_module.run_gagnee:
+            return
         if not j.tenter_tir():
             return
         self.tir_t = 0.10
@@ -633,12 +632,20 @@ class Jeu:
         finally:
             config.DEGATS_TIR = base_degats
 
+    def synchroniser_arme(self):
+        """Appelé après equip / set : adapte chargeur et recharge en cours à l'arme."""
+        j = self.joueur
+        j.chargeur = min(j.chargeur, config.CHARGEUR_TAILLE)
+        self.popup_text = f"ARME : {armes.ARMES[armes.equipee]['nom']}"
+        self.popup_color = (0, 255, 255)
+        self.popup_timer = 2.0
+
     def interagir_coffre(self):
         butin = ouvrir_coffre_proche(self.zone, config.cam_x, config.cam_z)
         return butin
 
     def recharger(self):
-        if self.joueur.mort:
+        if self.joueur.mort or boss_module.run_gagnee:
             self.reinitialiser()
         else:
             self.joueur.lancer_recharge()
@@ -650,13 +657,16 @@ class Jeu:
         self.stats.update(dt, j)
         self.tir_t = max(0.0, self.tir_t - dt)
         self.popup_timer = max(0.0, self.popup_timer - dt)
-        if j.mort:
+        if j.mort or boss_module.run_gagnee:
             return
+        self.temps_run += dt
 
         vitesse = 250 * self.stats.vitesse_mult * dt
         rad = math.radians(config.yaw)
         config.cam_x += (avant * math.sin(rad) + cote * math.cos(rad)) * vitesse
         config.cam_z += (avant * math.cos(rad) - cote * math.sin(rad)) * vitesse
+
+        config.cam_x, config.cam_z = terrain.repousser(config.cam_x, config.cam_z, config.cam_y + 30)
 
         # Calcul de la hauteur du sol selon le biome actuel de la zone
         biome_courant = terrain.get_biome_actuel(
@@ -683,11 +693,17 @@ class Jeu:
             self.popup_text = f"COUCHE {couche + 1}/{terrain.NB_COUCHES} - {biome['nom']}"
             self.popup_color = biome["couleur_grille"]
             self.popup_timer = 3.5
+
+        # Dernière couche atteinte -> boss final (fin de run quand il tombe)
+        if couche >= terrain.NB_COUCHES - 1 and boss_module.lancer_boss_final(config.cam_x, config.cam_z):
+            self.popup_text = "!!! BOSS FINAL !!!"
+            self.popup_color = (255, 40, 40)
+            self.popup_timer = 4.0
         boosts.ramasser_butins(j, self.stats, config.cam_x, config.cam_z, dt)
 
         entity.mettre_a_jour_monstres(dt, self.zone["cles"], j, temps)
         entity.mettre_a_jour_projectiles(dt, j)
-        entity.mettre_a_jour_pickups(j, dt)
+        entity.mettre_a_jour_pickups(j, dt, self.stats)
         boss_module.mettre_a_jour_boss(dt, j, temps)
         boss_module.mettre_a_jour_projectiles_boss(dt, j)
 
@@ -751,6 +767,8 @@ class Jeu:
 
         if j.mort:
             self.hud.dessiner_game_over(surf, j, temps)
+        elif boss_module.run_gagnee:
+            self.hud.dessiner_victoire(surf, j, temps, self.temps_run)
 
 # ---------------------------------------------------------------------------
 # Boucle principale
@@ -806,7 +824,7 @@ def main():
                     jeu.recharger()
                 elif event.type == pygame.KEYDOWN and event.key == pygame.K_F3:
                     jeu.debug_stats = not jeu.debug_stats
-                elif event.type == pygame.KEYDOWN and event.key == pygame.K_RETURN and jeu.joueur.mort:
+                elif event.type == pygame.KEYDOWN and event.key == pygame.K_RETURN and (jeu.joueur.mort or boss_module.run_gagnee):
                     jeu.recharger()
 
         # Vraie pause totale du jeu si l'inventaire est ouvert

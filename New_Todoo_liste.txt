@@ -3,11 +3,27 @@
 POUR la 0.1.0
 Principale pour la 0.1.0 > avoir un jeu fun sans bug, agréable et une fin avec progression.
 
--réparer les nivelet entre les biomes,
--crée une logique de progression avec différents biomes (dans un 1e temps commencer avec 5 biomes)
--terminer le system d implémentation facile pour les bonuses ainsi que pour les items qui existent dans le jeux (les 2 serons liée)
+crée slot armures, casque, torse, jambieres, bottes, ram (slot de rame augemente la tail du sac de 1 a 100% et applique sur tout les objet dans le sac des buff passif de stats)
+chaque slot d armures aura des stats FIX variables et des substats rdm ou un effet particulier rdm [armor effect]
+casque-réduction_dmgs(+3% a +25%), torse-augementations_hp(+10 a +75), jambieres-réduction-dmgs(+5% a +40%), bottes-vitesse(+10% a +30%)
+casque_sub/effect_possible
++1-5hp/s auto_regen Or 50-100% auto aim
+torse_sub/effect_possible
++10-50% hit_speed or dash_atq with A (dash range 1 a 3 cell, inflige des degats dans toutes les cellules au moment de la capacité (entre 150% a 300% de dmg CT 30 sec))
+jambieres_sub/effect_possible
+*10-40% multiplication damage or zap_chaine (when target was hit, zap n earest ennemies 3 - 10 times, damage_zap (damage + 10%))
+bottes_sub/effect_possible
++5-50 point partout (dmg_base, damage_reduction, hp, speed) calculer avant les autres augementations ou, +20 a 60% de multiplication de dmg qd joueur sprint
+Pour les rarté des items
+(la stat_multiplication multiplira la stat principale uniquement des items)
+Taux 45% - commun - stat_multiplication - 0.75
+Taux 35% - rare - stat_multiplication - 0.85
+Taux 10% - leg - stat_multiplication - 1
+Taux 7% - mythique - stat_multiplication - 1.5
+Taux 3% - special - stat_multiplication - 1.25 possede tout les substats/effet en meme temps
+-terminer le system d implémentation facile pour les bonuses ainsi que pour les items (ames/ armures) qui existent dans le jeux (les 2 serons liée)
 car les loot des coffres serons l un des 2 ou des ressources
 Ajouter des partucules de tires qd cible toucher (mettre un effet avec de l hexadecimal en ROUGE VIF)
 -Ajouter bosses a chaque couche atteinte de la map
--changer les nom des éléments & ajouter des mecaniques / builings en lien avec la da du jeux -> 
+-changer les nom des éléments & ajouter des mecaniques / builings en lien avec la da du jeux ->
 le but de d avoir l impression d etre dans un system numérique/informatique
