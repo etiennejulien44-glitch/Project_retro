@@ -1,5 +1,6 @@
 # game_test.py  --  FPS rétro synthwave
 import math
+import random
 import sys
 from itertools import repeat
 from operator import itemgetter
@@ -70,9 +71,30 @@ def _couleurs_decor(spec):
     seuil = -spec["hauteur"] / spec["echelle"] * 0.35
     return [spec["couleur_2"] if max(a[1], b[1]) < seuil else spec["couleur"] for a, b in spec["modele"]]
 
+def _faces_boite_decor(spec):
+    """Génère automatiquement les 6 faces d'un décor opaque à partir de ses points."""
+    if not spec.get("opaque"):
+        return None
+    pts = [p for seg in spec["modele"] for p in seg]
+    echelle = spec["echelle"]
+    xs, ys, zs = [p[0] * echelle for p in pts], [p[1] * echelle for p in pts], [p[2] * echelle for p in pts]
+    x0, x1 = min(xs), max(xs)
+    y0, y1 = min(ys), max(ys)
+    z0, z1 = min(zs), max(zs)
+    return [
+        (np.array([(x0, y0, z0), (x1, y0, z0), (x1, y0, z1), (x0, y0, z1)], dtype=np.float32), spec["couleur_2"]),
+        (np.array([(x0, y1, z0), (x1, y1, z0), (x1, y1, z1), (x0, y1, z1)], dtype=np.float32), spec["couleur"]),
+        (np.array([(x0, y0, z0), (x1, y0, z0), (x1, y1, z0), (x0, y1, z0)], dtype=np.float32), spec["couleur"]),
+        (np.array([(x0, y0, z1), (x1, y0, z1), (x1, y1, z1), (x0, y1, z1)], dtype=np.float32), spec["couleur"]),
+        (np.array([(x0, y0, z0), (x0, y0, z1), (x0, y1, z1), (x0, y1, z0)], dtype=np.float32), spec["couleur"]),
+        (np.array([(x1, y0, z0), (x1, y0, z1), (x1, y1, z1), (x1, y1, z0)], dtype=np.float32), spec["couleur"]),
+    ]
 
 # Décors : AUTOMATIQUE depuis data/decors.py
-DECORS_RENDU = {did: (*_aplatir_modele(d["modele"], d["echelle"]), _couleurs_decor(d)) for did, d in DECORS.items()}
+DECORS_RENDU = {
+    did: (*_aplatir_modele(d["modele"], d["echelle"]), _couleurs_decor(d), _faces_boite_decor(d))
+    for did, d in DECORS.items()
+}
 COFFRES_RENDU = {cle: (*_aplatir_modele(d["modele"], d["echelle"]), d) for cle, d in COFFRES.items()}
 MONSTRES_RENDU = {cle: (*_aplatir_modele(d["modele"], d.get("echelle", 1.0)), d["couleur"])
                   for cle, d in BESTIAIRE.items()}
@@ -311,8 +333,20 @@ def collecter_entites(zone, items, temps):
     for did, bases in zone["decors"].items():
         _, _, rz, v = projeter_3d_masse(bases)
         vis = np.nonzero(v)[0]
-        if len(vis):
-            P1, P2, cols = DECORS_RENDU[did]
+        if not len(vis):
+            continue
+        
+        P1, P2, cols, faces = DECORS_RENDU[did]
+        if faces is not None:
+            # Nouveau rendu opaque
+            for b in bases[vis]:
+                for f_pts, f_col in faces:
+                    ex_f, ey_f, rz_f, vf = projeter_3d_masse(b[None, :] + f_pts)
+                    if vf.all():
+                        pts2 = list(zip(ex_f.astype(int).tolist(), ey_f.astype(int).tolist()))
+                        items.append((float(rz_f.mean()) - BIAIS_ENTITES, 2, (pts2, [True, True, True, True]), f_col))
+        else:
+            # Rendu fil de fer classique d'origine
             for segs, p in zip(_segments_entites(bases[vis], P1, P2, cols), rz[vis].tolist()):
                 if segs:
                     items.append((p - BIAIS_ENTITES, 1, segs, None))
@@ -346,9 +380,9 @@ def collecter_entites(zone, items, temps):
 
     if entity.pickups:
         arr = np.array(entity.pickups, dtype=np.float64)
-        bob = np.sin(temps * 3 + arr[:, 0] * 0.01) * 6 + 45
+        bob = np.sin(temps * 3 + arr[:, 0] * 0.01) * 6 + 22      # flotte au-dessus du sol
         pos = np.column_stack((arr[:, 0],
-                               get_hauteur_sol(arr[:, 0], arr[:, 1]) + bob,
+                               get_hauteur_sol(arr[:, 0], arr[:, 1]) - bob,
                                arr[:, 1])).astype(np.float32)
         _, _, rz, v = projeter_3d_masse(pos)
         ang = temps * 2.0
@@ -409,6 +443,17 @@ def collecter_coffres(zone, items, temps):
                 items.append((prof, 3, segs, None))
 
 # ---------------------------------------------------------------------------
+# Éclairs (zap_chaine des jambières)
+# ---------------------------------------------------------------------------
+def collecter_zaps(items):
+    for z in entity.zaps:
+        pts = np.array([[z[0], z[1], z[2]], [z[3], z[4], z[5]]], dtype=np.float32)
+        ax, ay, rz, ok = projeter_3d_masse(pts)
+        if ok[0] and ok[1]:
+            items.append((float(min(rz[0], rz[1])) - 20, 4,
+                          ((int(ax[0]), int(ay[0])), (int(ax[1]), int(ay[1]))), None))
+
+# ---------------------------------------------------------------------------
 # Butins
 # ---------------------------------------------------------------------------
 def collecter_butins(items, temps):
@@ -424,10 +469,10 @@ def collecter_butins(items, temps):
     age = np.clip(temps - spawn, 0.0, 0.35)
     t_anim = age / 0.35
     scale = 0.3 + 0.7 * t_anim
-    y_offset = (1.0 - t_anim) * 120.0 + 30.0
+    y_offset = (1.0 - t_anim) * 120.0 + 40.0                 # jaillit du coffre puis flotte à 40
 
     bob = np.sin(temps * 3 + ph) * 6
-    ys = (get_hauteur_sol(xs, zs) + bob + y_offset).astype(np.float32)
+    ys = (get_hauteur_sol(xs, zs) - bob - y_offset).astype(np.float32)   # Y vers le bas : on soustrait
 
     ang = temps * 2.0
     c, s = math.cos(ang), math.sin(ang)
@@ -453,7 +498,7 @@ def collecter_butins(items, temps):
         ok = va & vb
         if not ok.any():
             continue
-        base = boosts.COULEURS_RARETE[butins[i].rarete]
+        base = butins[i].couleur
         ax_i, ay_i = ax.tolist(), ay.tolist()
         bx_i, by_i = bx.tolist(), by.tolist()
         segs = [((ax_i[j], ay_i[j]), (bx_i[j], by_i[j]), base)
@@ -465,9 +510,9 @@ def collecter_butins(items, temps):
 # ---------------------------------------------------------------------------
 # Interaction coffres
 # ---------------------------------------------------------------------------
-def ouvrir_coffre_proche(zone, joueur_x, joueur_z, distance=DISTANCE_INTERACTION_COFFRE):
-    meilleur = None
-    meilleure_dist = distance
+def coffre_proche(zone, joueur_x, joueur_z, distance=DISTANCE_INTERACTION_COFFRE):
+    """(coffre, distance) du coffre fermé le plus proche, ou (None, inf)."""
+    meilleur, meilleure_dist = None, distance
     for cle in zone["cles"]:
         for chest in chest_caches[cle]:
             if chest["ouvert"]:
@@ -476,18 +521,28 @@ def ouvrir_coffre_proche(zone, joueur_x, joueur_z, distance=DISTANCE_INTERACTION
             if d < meilleure_dist:
                 meilleure_dist = d
                 meilleur = chest
+    return meilleur, (meilleure_dist if meilleur else float("inf"))
+
+
+def ouvrir_coffre_proche(zone, joueur_x, joueur_z, distance=DISTANCE_INTERACTION_COFFRE):
+    meilleur, _ = coffre_proche(zone, joueur_x, joueur_z, distance)
     if meilleur is None:
         return None
     meilleur["ouvert"] = True
-    butin = boosts.tirer_butin(meilleur["type"], meilleur["x"], meilleur["z"])
-    boosts.spawner_butin(butin)
-    return butin
+    butins = []
+    for i in range(COFFRES[meilleur["type"]].get("nb_butins", 1)):
+        dx, dz = (0.0, 0.0) if i == 0 else (random.uniform(-70, 70), random.uniform(-70, 70))
+        butin = boosts.tirer_butin(meilleur["type"], meilleur["x"] + dx, meilleur["z"] + dz)
+        boosts.spawner_butin(butin)
+        butins.append(butin)
+    return butins
 
 # ---------------------------------------------------------------------------
 # Overlay debug
 # ---------------------------------------------------------------------------
-def dessiner_debug_stats(surf, joueur, stats):
+def dessiner_debug_stats(surf, joueur, stats, jeu=None):
     font = pygame.font.SysFont(None, 22)
+    arme = equipements.possedees.get(equipements.equipees["arme"], {})
     lignes = [
         f"PV : {joueur.pv}/{config.JOUEUR_PV_MAX}",
         f"Vitesse : x{stats.vitesse_mult:.2f}  (+{int(stats.vitesse_bonus*100)}%)",
@@ -496,7 +551,13 @@ def dessiner_debug_stats(surf, joueur, stats):
         f"Auto-regen : {'ON' if stats.auto_regen else 'off'}",
         f"Munitions : {joueur.chargeur} / {joueur.reserve}",
         f"Kills : {joueur.kills}",
+        f"Arme : {arme.get('nom', '-')} [{arme.get('rarete', '-')}]  dgt {config.DEGATS_TIR:.2f}",
+        f"Armure : -{int(config.REDUCTION_DEGATS*100)}% dgts  +{int(config.BONUS_HP)} PV  vit +{int(config.BONUS_VITESSE*100)}%",
+        f"Poids : {equipements.poids_porte()}/{equipements.poids_max()} MB",
     ]
+    if config.DASH_CELLULES > 0 and jeu is not None:
+        etat = "PRET [A]" if jeu.dash_cd <= 0 else f"{jeu.dash_cd:.0f}s"
+        lignes.append(f"Dash ({config.DASH_CELLULES:.1f} cell) : {etat}")
     pad = 8
     largeur = 380
     hauteur = len(lignes) * 22 + pad * 2
@@ -573,10 +634,15 @@ class Jeu:
         self.popup_timer = 0.0
         self.popup_color = (255, 255, 255)
         self.font_popup = pygame.font.SysFont(None, 56)
+        self.font_invite = pygame.font.SysFont(None, 36)
         self.debug_stats = DEBUG_STATS
         self.terminal = TerminalInventory()
         self.terminal.jeu = self
         self.en_inventaire = False
+        self.dash_cd = 0.0
+        self.sprint = False
+        self._equip_version = -1
+        self._arme_affichee = None
         self.reinitialiser()
 
     def reinitialiser(self):
@@ -600,6 +666,10 @@ class Jeu:
         config.yaw = config.pitch = config.vitesse_y = 0.0
         config.mettre_a_jour_rayons()
         self.joueur.reinitialiser()
+        self.dash_cd = 0.0
+        self.sprint = False
+        self._arme_affichee = equipements.equipees["arme"]
+        self.synchroniser_equipement(annonce=False)
         self.tir_t = 0.0
         self.tir_fin = None
         self.popup_text = ""
@@ -624,7 +694,7 @@ class Jeu:
         if not j.tenter_tir():
             return
         self.tir_t = 0.10
-        mult = self.stats.degats_mult
+        mult = self.stats.degats_mult * equipements.multiplicateur_degats(self.sprint)
         base_degats = config.DEGATS_TIR
         config.DEGATS_TIR = base_degats * mult
         try:
@@ -632,17 +702,100 @@ class Jeu:
         finally:
             config.DEGATS_TIR = base_degats
 
-    def synchroniser_arme(self):
-        """Appelé après equip / set : adapte chargeur et recharge en cours à l'arme."""
+    def synchroniser_equipement(self, annonce=True):
+        """Appelé dès que l'équipement change (terminal, ramassage, reset) : PV max, chargeur, annonce d'arme."""
         j = self.joueur
-        j.chargeur = min(j.chargeur, config.CHARGEUR_TAILLE)
-        self.popup_text = f"ARME : {equipements.ARMES[equipements.equipee]['nom']}"
-        self.popup_color = (0, 255, 255)
-        self.popup_timer = 2.0
+        self.stats.recalculer_pv_max(j)
+        if j.chargeur > config.CHARGEUR_TAILLE:          # arme au chargeur plus petit : le surplus retourne en réserve
+            surplus = j.chargeur - config.CHARGEUR_TAILLE
+            j.chargeur = config.CHARGEUR_TAILLE
+            j.reserve = min(config.MUNITIONS_RESERVE_MAX, j.reserve + surplus)
+        self._equip_version = equipements.version
+        arme_id = equipements.equipees["arme"]
+        if annonce and arme_id != self._arme_affichee and arme_id in equipements.possedees:
+            it = equipements.possedees[arme_id]
+            self.popup_text = f"ARME : {it['nom']} [{it['rarete'].upper()}]"
+            self.popup_color = equipements.RARETES[it["rarete"]]["couleur"]
+            self.popup_timer = 2.0
+        self._arme_affichee = arme_id
+
+    def cible_interaction(self):
+        """Ce que la touche F ferait ici : le plus proche parmi coffre fermé / butin / pickup.
+        -> (genre, objet, libellé, couleur) ou None."""
+        x, z, r = config.cam_x, config.cam_z, config.RAYON_INTERACTION
+        meilleur, d_min = None, r
+        chest, d = coffre_proche(self.zone, x, z, r)
+        if chest is not None:
+            meilleur, d_min = ("coffre", chest, "Ouvrir le coffre", (255, 255, 255)), d
+        for b in boosts.butins_au_sol:
+            d = math.hypot(b.x - x, b.z - z)
+            if d < d_min:
+                meilleur, d_min = ("butin", b, f"Ramasser {b.nom}", b.couleur), d
+        for p in entity.pickups:
+            d = math.hypot(p[0] - x, p[1] - z)
+            if d < d_min:
+                d_def = boosts.BOOSTS[boosts.PICKUP_IDS[int(p[2])]]
+                meilleur, d_min = ("pickup", p, f"Ramasser {d_def['nom']}", d_def["pickup"]["couleur"]), d
+        return meilleur
+
+    def interagir(self):
+        """Touche F : ouvre le coffre / ramasse l'objet le plus proche. Plus d'aimant ni de ramassage forcé."""
+        if self.joueur.mort or boss_module.run_gagnee:
+            return
+        cible = self.cible_interaction()
+        if cible is None:
+            return
+        genre, obj, _, _ = cible
+        if genre == "coffre":
+            self.interagir_coffre()
+            return
+        self.stats.messages_ramassage.clear()
+        if genre == "butin":
+            obj.notifie = False                       # on veut le message "trop lourd" à chaque essai
+            if boosts.appliquer(obj.def_id, self.stats, self.joueur, obj):
+                boosts.butins_au_sol[:] = [b for b in boosts.butins_au_sol if b is not obj]
+        else:
+            if boosts.appliquer(boosts.PICKUP_IDS[int(obj[2])], self.stats, self.joueur):
+                entity.pickups[:] = [p for p in entity.pickups if p is not obj]
+        if not self.stats.messages_ramassage:             # refus sans message (munitions / PV déjà pleins...)
+            self.stats.messages_ramassage.append(("DEJA AU MAXIMUM", (255, 120, 120)))
 
     def interagir_coffre(self):
-        butin = ouvrir_coffre_proche(self.zone, config.cam_x, config.cam_z)
-        return butin
+        butins = ouvrir_coffre_proche(self.zone, config.cam_x, config.cam_z)
+        if butins:
+            self.popup_text = "COFFRE : " + " + ".join(b.nom for b in butins)
+            self.popup_color = butins[0].couleur
+            self.popup_timer = 2.5
+        return butins
+
+    def dash(self):
+        """Torse (dash_atq) : bond en avant qui blesse tout sur le trajet. Touche A, recharge 30 s."""
+        j = self.joueur
+        if j.mort or boss_module.run_gagnee or config.DASH_CELLULES <= 0:
+            return
+        if self.dash_cd > 0:
+            self.popup_text = f"DASH : {self.dash_cd:.0f}s"
+            self.popup_color = (255, 120, 120)
+            self.popup_timer = 1.0
+            return
+        dist = config.DASH_CELLULES * config.DASH_UNITES_PAR_CELLULE
+        rad = math.radians(config.yaw)
+        dx, dz = math.sin(rad), math.cos(rad)
+        x0, z0 = config.cam_x, config.cam_z
+        etapes = max(1, int(dist // 25))
+        x, z = x0, z0
+        for _ in range(etapes):                           # par petits pas : les décors solides bloquent le dash
+            x, z = terrain.repousser(x + dx * dist / etapes, z + dz * dist / etapes, config.cam_y + 30)
+        config.cam_x, config.cam_z = x, z
+        t = max(0.0, min(1.0, (config.DASH_CELLULES - 1.0) / 2.0))     # 1 cellule -> 150%, 3 cellules -> 300%
+        mult_dash = config.DASH_DEGATS_MIN + (config.DASH_DEGATS_MAX - config.DASH_DEGATS_MIN) * t
+        degats = (config.DEGATS_TIR * self.stats.degats_mult
+                  * equipements.multiplicateur_degats(False) * mult_dash)
+        nb = entity.degats_zone_segment(self.zone["cles"], x0, z0, x, z, config.DASH_RAYON, degats, j)
+        self.dash_cd = config.DASH_COOLDOWN
+        self.popup_text = f"DASH ! {nb} cible(s)" if nb else "DASH !"
+        self.popup_color = (0, 255, 255)
+        self.popup_timer = 1.2
 
     def recharger(self):
         if self.joueur.mort or boss_module.run_gagnee:
@@ -650,10 +803,14 @@ class Jeu:
         else:
             self.joueur.lancer_recharge()
 
-    def mettre_a_jour(self, dt, temps, avant, cote, saut):
+    def mettre_a_jour(self, dt, temps, avant, cote, saut, sprint=False):
         config.mettre_a_jour_rayons()
         j = self.joueur
+        if equipements.version != self._equip_version:       # équipement modifié depuis la dernière frame
+            self.synchroniser_equipement()
         j.mettre_a_jour(dt)
+        self.dash_cd = max(0.0, self.dash_cd - dt)
+        entity.mettre_a_jour_zaps(dt)
         self.stats.update(dt, j)
         self.tir_t = max(0.0, self.tir_t - dt)
         self.popup_timer = max(0.0, self.popup_timer - dt)
@@ -661,7 +818,10 @@ class Jeu:
             return
         self.temps_run += dt
 
-        vitesse = 250 * self.stats.vitesse_mult * dt
+        self.sprint = bool(sprint) and (avant != 0 or cote != 0)
+        vitesse = 250 * self.stats.vitesse_mult * (1.0 + config.BONUS_VITESSE) * dt
+        if self.sprint:
+            vitesse *= config.SPRINT_MULT
         rad = math.radians(config.yaw)
         config.cam_x += (avant * math.sin(rad) + cote * math.cos(rad)) * vitesse
         config.cam_z += (avant * math.cos(rad) - cote * math.sin(rad)) * vitesse
@@ -717,6 +877,7 @@ class Jeu:
         collecter_boss(items, temps)
         collecter_projectiles_boss(items)
         collecter_butins(items, temps)
+        collecter_zaps(items)
         collecter_entites(self.zone, items, temps)
         dessiner_items(surf, items, self.zone)
 
@@ -741,6 +902,12 @@ class Jeu:
             self.popup_color = couleur
             self.popup_timer = 2.5
 
+        if not j.mort and not boss_module.run_gagnee and not self.en_inventaire:
+            cible = self.cible_interaction()
+            if cible is not None:
+                invite = self.font_invite.render(f"[F]  {cible[2]}", True, cible[3])
+                surf.blit(invite, (config.LARGEUR // 2 - invite.get_width() // 2, config.HAUTEUR // 2 + 110))
+
         if self.popup_timer > 0 and self.popup_text:
             alpha = min(1.0, self.popup_timer / 0.4)
             txt = self.font_popup.render(self.popup_text, True, self.popup_color)
@@ -755,7 +922,7 @@ class Jeu:
             surf.blit(txt, (cx - txt.get_width() // 2, cy - txt.get_height() // 2))
 
         if self.debug_stats:
-            dessiner_debug_stats(surf, j, self.stats)
+            dessiner_debug_stats(surf, j, self.stats, self)
 
         if self.en_inventaire:
             overlay = pygame.Surface((config.LARGEUR, config.HAUTEUR), pygame.SRCALPHA)
@@ -770,9 +937,6 @@ class Jeu:
         elif boss_module.run_gagnee:
             self.hud.dessiner_victoire(surf, j, temps, self.temps_run)
 
-# ---------------------------------------------------------------------------
-# Boucle principale
-# ---------------------------------------------------------------------------
 # ---------------------------------------------------------------------------
 # Boucle principale
 # ---------------------------------------------------------------------------
@@ -819,7 +983,9 @@ def main():
                 elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                     jeu.tirer()
                 elif event.type == pygame.KEYDOWN and event.key == pygame.K_f:
-                    jeu.interagir_coffre()
+                    jeu.interagir()
+                elif event.type == pygame.KEYDOWN and event.key == pygame.K_a:
+                    jeu.dash()
                 elif event.type == pygame.KEYDOWN and event.key == pygame.K_r:
                     jeu.recharger()
                 elif event.type == pygame.KEYDOWN and event.key == pygame.K_F3:
@@ -833,7 +999,8 @@ def main():
             jeu.mettre_a_jour(dt, temps,
                               touches[pygame.K_z] - touches[pygame.K_s],
                               touches[pygame.K_d] - touches[pygame.K_q],
-                              touches[pygame.K_SPACE])
+                              touches[pygame.K_SPACE],
+                              touches[pygame.K_LSHIFT])
 
         jeu.rendre(temps)
         pygame.display.flip()

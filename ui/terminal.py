@@ -1,6 +1,6 @@
 # ui/terminal.py
 import pygame
-from data import equipements
+from data import config, equipements
 
 class TerminalInventory:
     def __init__(self):
@@ -36,15 +36,15 @@ class TerminalInventory:
         
         self.output_logs = [
             "SYNTH_OS v1.08 - SECURE SHELL [SYSTEM PAUSE]",
-            "Commandes: ls, cd, cat, equip, set, reset, clear, exit  (help)"
+            "Commandes: ls, cd, cat, equip, unequip, rm, stats, set, reset, clear, exit  (help)"
         ]
 
     def get_current_dir_obj(self):
         if self.current_path == ["home", "inventory"]:
             # Récupère dynamiquement la liste et la taille depuis possedees
             return {
-                item_id: {"type": item_data["type"], "size": item_data["taille"]} 
-                for item_id, item_data in equipements.possedees.items()
+                uid: {"type": it["type"], "size": it["taille"], "rarete": it["rarete"]}
+                for uid, it in equipements.possedees.items()
             }
         curr = self.fs
         for p in self.current_path:
@@ -61,26 +61,51 @@ class TerminalInventory:
     def _cmd_equipement(self, cmd, args):
         L = self.output_logs
         if cmd == "cat":
-            if not args or args[0] not in equipements.possedees:
+            uid = equipements.resoudre(args[0]) if args else None
+            if uid is None:
                 L.append("cat: usage  cat <item_id>   (ls dans inventory pour la liste)")
                 return
-            item_id = args[0]
-            item = equipements.possedees[item_id]
-            
-            # Vérification de l'équipement dans l'un des slots
-            est_equipe = "EQUIPE" if item_id in equipements.equipees.values() else "range"
-            L.append(f"{item['nom']} [{item['type']}] ({item['rarete'].upper()}) - {'[' + est_equipe + ']'}")
-            
+            item = equipements.possedees[uid]
+            etat = "EQUIPE" if uid in equipements.equipees.values() else "range"
+            L.append(f"{uid} : {item['nom']} [{item['type']}] ({item['rarete'].upper()}) - [{etat}]")
             for st, v in item["stats"].items():
                 L.append(f"   {st:18s} = {v}")
 
         elif cmd == "equip":
-            if args and equipements.equiper(args[0]):
+            uid = equipements.resoudre(args[0]) if args else None
+            equipements.derniere_erreur = ""
+            if uid and equipements.equiper(uid):
                 self._sync()
-                slot = equipements.possedees[args[0]]["type"]
-                L.append(f"{args[0]} équipée dans le slot [{slot}].")
+                L.append(f"{uid} équipé dans le slot [{equipements.possedees[uid]['type']}].")
             else:
-                L.append("equip: usage  equip <item_id>   (item possédé)")
+                L.append("equip: " + (equipements.derniere_erreur or "usage  equip <item_id>   (item possédé)"))
+
+        elif cmd == "unequip":
+            equipements.derniere_erreur = ""
+            if args and equipements.desequiper(args[0]):
+                self._sync()
+                L.append(f"{args[0]} déséquipé (reste dans l'inventaire).")
+            else:
+                L.append("unequip: " + (equipements.derniere_erreur or "usage  unequip <slot|item_id>"))
+
+        elif cmd == "rm":
+            if not args:
+                L.append("rm: usage  rm <item_id>   (jette l'objet et libère du poids)")
+                return
+            ok, msg = equipements.jeter(args[0])
+            L.append(msg)
+            if ok:
+                self._sync()
+
+        elif cmd == "stats":
+            t = equipements.stats_actives or equipements.calculer_stats()
+            L.append(f"  Poids : {equipements.poids_porte()}/{equipements.poids_max()} MB")
+            L.append(f"  Réduction dégâts : -{config.REDUCTION_DEGATS * 100:.0f}%   PV bonus : +{config.BONUS_HP:.0f}")
+            L.append(f"  Vitesse : +{config.BONUS_VITESSE * 100:.0f}%   Dégâts : x{equipements.multiplicateur_degats():.2f}")
+            actifs = [f"{k}={v:g}" for k, v in t.items() if v and k not in (
+                "reduction_dmgs", "augmentation_hp", "vitesse", "poids_max_buff")]
+            if actifs:
+                L.append("  Effets : " + ", ".join(actifs))
 
         elif cmd == "set":
             if len(args) != 3:
@@ -98,7 +123,7 @@ class TerminalInventory:
         elif cmd == "reset":
             if args and equipements.reset_item(args[0]):
                 self._sync()
-                L.append(f"{args[0]} remis aux stats d'origine.")
+                L.append(f"{args[0]} : stats re-générées.")
             else:
                 L.append("reset: usage  reset <item_id>")
 
@@ -147,12 +172,18 @@ class TerminalInventory:
             for name, data in contents.items():
                 if data["type"] == "dir":
                     self.output_logs.append(f"  [DIR]  {name}/")
+                elif "rarete" in data:
+                    marque = "*" if name in equipements.equipees.values() else " "
+                    self.output_logs.append(
+                        f"  [{data['type']:9s}]{marque}{name} ({data['rarete']}) ---- {data['size']}")
                 else:
                     self.output_logs.append(f"  [{data['type']:9s}] {name} ---- {data['size']}")
             
-            if "inventory" in self.current_path:
+            if self.current_path == ["home", "inventory"]:
                 slots_str = ", ".join([f"{slot}:{iid or 'vide'}" for slot, iid in equipements.equipees.items()])
-                self.output_logs.append(f"  équipés : {slots_str}")
+                self.output_logs.append(f"  équipés (*) : {slots_str}")
+                self.output_logs.append(
+                    f"  poids porté : {equipements.poids_porte()}MB/{equipements.poids_max()}MB")
         
         elif cmd == "cd":
             if not args or args[0] == "~":
@@ -170,13 +201,14 @@ class TerminalInventory:
                 else:
                     self.output_logs.append(f"cd: dossier introuvable : {target}")
         
-        elif cmd in ("cat", "equip", "set", "reset"):
+        elif cmd in ("cat", "equip", "unequip", "rm", "stats", "set", "reset"):
             self._cmd_equipement(cmd, args)
 
         elif cmd == "help" or "-h" in args:
             self.output_logs.append("ls, cd <dir>, cd .., clear, exit")
             self.output_logs.append("Equipements (cd inventory) : cat <item_id>, equip <item_id>,")
-            self.output_logs.append("   set <item_id> <stat> <valeur>, reset <item_id>")
+            self.output_logs.append("   unequip <slot|item_id>, rm <item_id>, stats, set <item_id> <stat> <valeur>,")
+            self.output_logs.append("   reset <item_id>   (ex: equip helmet_3 ; * dans ls = équipé)")
         
         elif cmd == "clear":
             self.output_logs.clear()

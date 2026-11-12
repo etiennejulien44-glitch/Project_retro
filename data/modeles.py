@@ -207,6 +207,35 @@ def _octa(r, yc):
     haut, bas = (0, yc - r * 1.6, 0), (0, yc + r * 1.6, 0)
     return [(P[i], P[(i + 1) % 4]) for i in (0, 2, 1, 3)] + [(q, haut) for q in P] + [(q, bas) for q in P]
 
+def _boite_faces(largeur, hauteur, profondeur, cloisons=1):
+    dx, dy, dz = largeur / 2, hauteur / 2, profondeur / 2
+    faces = []
+
+    # --- Les 6 faces extérieures (4 sommets dans l'ordre du tour + couleur) ---
+    faces.extend([
+        # Dessus (Y-)
+        {"points": [(-dx, -dy, -dz), (dx, -dy, -dz), (dx, -dy, dz), (-dx, -dy, dz)], "couleur": (80, 80, 90)},
+        # Dessous (Y+)
+        {"points": [(-dx, dy, -dz), (dx, dy, -dz), (dx, dy, dz), (-dx, dy, dz)], "couleur": (30, 30, 35)},
+        # Avant (Z-)
+        {"points": [(-dx, -dy, -dz), (dx, -dy, -dz), (dx, dy, -dz), (-dx, dy, -dz)], "couleur": (65, 65, 75)},
+        # Arrière (Z+)
+        {"points": [(-dx, -dy, dz), (dx, -dy, dz), (dx, dy, dz), (-dx, dy, dz)], "couleur": (45, 45, 55)},
+        # Gauche (X-)
+        {"points": [(-dx, -dy, -dz), (-dx, -dy, dz), (-dx, dy, dz), (-dx, dy, -dz)], "couleur": (55, 55, 65)},
+        # Droite (X+)
+        {"points": [(dx, -dy, -dz), (dx, -dy, dz), (dx, dy, dz), (dx, dy, -dz)], "couleur": (70, 70, 80)},
+    ])
+
+    # --- Cloisons internes (exemple : découpe régulière sur l'axe X) ---
+    for i in range(1, cloisons + 1):
+        x = -dx + (largeur * i) / (cloisons + 1)
+        faces.append({
+            "points": [(x, -dy, -dz), (x, -dy, dz), (x, dy, dz), (x, dy, -dz)],
+            "couleur": (50, 50, 60),
+        })
+
+    return faces
 
 # --- Décors ---
 MODELE_BLOC = _boite(100, 100, 100, cloisons=1)

@@ -112,10 +112,10 @@ CAP_VITESSE = 2           # laisse 3 boosts avant plafond
 CAP_SAUT    = 0.36
 CAP_DEGATS  = 0.75 
 
-#rammasage des boostes
-RAYON_AIMANT_BUTINS = 200
-VITESSE_AIMANT_BUTINS = 900
-RAYON_RAMASSAGE_BUTINS = 40
+# Ramassage : touche F (plus d'aimant). RAMASSAGE_AUTO = True -> ramassage au contact, sans touche.
+RAMASSAGE_AUTO = False
+RAYON_RAMASSAGE_BUTINS = 40      # distance de contact (mode auto)
+RAYON_INTERACTION = 160          # distance max pour ramasser / ouvrir un coffre avec F
 
 # ---------------------------------------------------------------------------
 # BOSS — SPIDER BOSS
@@ -169,6 +169,42 @@ BOSS_PHASE_3 = 0.33
 # Drop
 BOSS_NB_DROPS     = 2
 BOSS_DROPS_POOL   = ["VIE_J", "VITESSE_J", "SAUT_J", "DEGATS_J", "AUTO_REGEN_R"]
+
+# ---------------------------------------------------------------------------
+# ÉQUIPEMENTS (armures, poids transportable, effets) -- recalculés par data/equipements.appliquer_config()
+# ---------------------------------------------------------------------------
+POIDS_MAX_BASE_MB = 100         # poids max transportable sans RAM (chaque objet pèse 5 à 20 MB)
+
+# Valeurs actives (ne pas modifier ici : écrasées à chaque changement d'équipement)
+REDUCTION_DEGATS = 0.0
+BONUS_HP = 0.0
+BONUS_VITESSE = 0.0
+BONUS_DEGATS_BASE = 0.0
+BUFF_POIDS_MAX = 0.0
+REGEN_EQUIP = 0.0
+AUTO_AIM = 0.0
+MULT_DEGATS_EQUIP = 0.0
+BONUS_DEGATS_SPRINT = 0.0
+ZAP_NB = 0
+DASH_CELLULES = 0.0
+
+# Réglages des effets
+REDUCTION_MAX = 0.80            # plafond de réduction de dégâts cumulée
+SPRINT_MULT = 1.5               # LSHIFT : vitesse x1.5
+AUTO_AIM_RAYON = 2.0            # rayon de touche x(1 + AUTO_AIM * AUTO_AIM_RAYON) pour une aide à 100%
+ZAP_PORTEE = 650                # distance max d'un éclair autour de la cible
+ZAP_BONUS_DEGATS = 0.10         # un éclair inflige dégâts x1.10
+DASH_COOLDOWN = 30.0
+DASH_UNITES_PAR_CELLULE = 150   # 1 cellule de dash = 150 unités (le joueur court à 250/s)
+DASH_RAYON = 110                # largeur de la zone touchée le long du dash
+DASH_DEGATS_MIN = 1.5           # dash 1 cellule  -> 150% des dégâts
+DASH_DEGATS_MAX = 3.0           # dash 3 cellules -> 300% des dégâts
+
+# "all_stats" (+N points partout) : N est converti ainsi
+ALL_STATS_HP = 1.0              # +1 PV par point
+ALL_STATS_DEGATS = 0.01         # +1% dégâts de base par point
+ALL_STATS_REDUCTION = 0.005     # +0.5% réduction par point
+ALL_STATS_VITESSE = 0.005       # +0.5% vitesse par point
 
 def mettre_a_jour_rayons():
     global COS_YAW, SIN_YAW, COS_PITCH, SIN_PITCH

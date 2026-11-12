@@ -12,13 +12,13 @@ from data.modeles import (MODELE_ARBRE, MODELE_BLOC, MODELE_MONOLITHE, MODELE_MU
 
 DECORS = {
     "arbre":        dict(modele=MODELE_ARBRE, echelle=4.0, couleur=(120, 70, 255), couleur_2=(40, 240, 255), rayon=24),
-    "bloc_data":    dict(modele=MODELE_BLOC, couleur=(0, 200, 255), couleur_2=(255, 0, 160), rayon=58),
-    "monolithe":    dict(modele=MODELE_MONOLITHE, couleur=(220, 70, 255), couleur_2=(255, 255, 255), rayon=34),
-    "mur_ruine":    dict(modele=MODELE_MUR, couleur=(255, 128, 0), couleur_2=(255, 60, 20), rayon=72),
-    "rack_serveur": dict(modele=MODELE_RACK, couleur=(255, 140, 0), couleur_2=(255, 230, 120), rayon=48),
-    "tour_chauffe": dict(modele=MODELE_TOUR, couleur=(255, 200, 0), couleur_2=(255, 70, 0), rayon=32),
-    "obelisque":    dict(modele=MODELE_OBELISQUE, couleur=(0, 255, 100), couleur_2=(210, 255, 225), rayon=34),
-    "cristal":      dict(modele=MODELE_CRISTAL, couleur=(0, 255, 170), rayon=18, solide=False, flottant=70),
+    "bloc_data":    dict(modele=MODELE_BLOC, couleur=(0, 200, 255), couleur_2=(255, 0, 160), rayon=58, opaque=True),
+    "monolithe":    dict(modele=MODELE_MONOLITHE, couleur=(220, 70, 255), couleur_2=(255, 255, 255), rayon=34, opaque=True),
+    "mur_ruine":    dict(modele=MODELE_MUR, couleur=(255, 128, 0), couleur_2=(255, 60, 20), rayon=72, opaque=True),
+    "rack_serveur": dict(modele=MODELE_RACK, couleur=(255, 140, 0), couleur_2=(255, 230, 120), rayon=48, opaque=True),
+    "tour_chauffe": dict(modele=MODELE_TOUR, couleur=(255, 200, 0), couleur_2=(255, 70, 0), rayon=32, opaque=True),
+    "obelisque":    dict(modele=MODELE_OBELISQUE, couleur=(0, 255, 100), couleur_2=(210, 255, 225), rayon=34, opaque=True),
+    "cristal":      dict(modele=MODELE_CRISTAL, couleur=(0, 255, 170), rayon=18, solide=False, flottant=70, opaque=True),
 }
 
 for _d in DECORS.values():       # champs dérivés automatiquement

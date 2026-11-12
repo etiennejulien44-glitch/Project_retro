@@ -11,6 +11,7 @@ from engine.renderer import projeter_3d_masse
 
 projectiles = []
 pickups = []       # [x, z, type, spawn_time]
+zaps = []          # éclairs du zap_chaine : [x1, y1, z1, x2, y2, z2, durée_restante]
 
 DELAI_RAMASSAGE = 0.6
 
@@ -45,6 +46,8 @@ class Joueur:
     def prendre_degats(self, n):
         if self.mort:
             return
+        if config.REDUCTION_DEGATS > 0:           # armures : casque / jambières / bottes...
+            n = max(1, int(round(n * (1.0 - config.REDUCTION_DEGATS))))
         self.pv -= n
         self.flash_degats = 0.35
         if self.pv <= 0:
@@ -103,6 +106,7 @@ class Joueur:
 def reinitialiser_entites():
     projectiles.clear()
     pickups.clear()
+    zaps.clear()
 
 
 def ligne_de_vue(x0, y0, z0, x1, y1, z1, n=14):
@@ -129,7 +133,8 @@ def deposer_butin(x, z):
 
 
 def mettre_a_jour_pickups(joueur, dt, stats):
-    if joueur.mort:
+    """Ramassage au contact (sans aimant), seulement si config.RAMASSAGE_AUTO. Sinon : touche F."""
+    if joueur.mort or not config.RAMASSAGE_AUTO:
         return
     now = time.time()
     restants = []
@@ -143,13 +148,6 @@ def mettre_a_jour_pickups(joueur, dt, stats):
             if not boosts.appliquer(boosts.PICKUP_IDS[int(p[2])], stats, joueur):
                 restants.append(p)        # plein : reste au sol
             continue
-
-        if d < config.RAYON_AIMANT_BUTINS:
-            step = config.VITESSE_AIMANT_BUTINS * dt
-            if step > d:
-                step = d
-            p[0] += (config.cam_x - p[0]) / d * step
-            p[1] += (config.cam_z - p[1]) / d * step
 
         restants.append(p)
     pickups[:] = restants
@@ -231,6 +229,7 @@ def mettre_a_jour_projectiles(dt, joueur):
 def tirer_laser(cles, joueur):
     cx, cy = config.LARGEUR // 2, config.HAUTEUR // 2
     candidats = []
+    aim = 1.0 + config.AUTO_AIM * config.AUTO_AIM_RAYON       # casque : aide à la visée
 
     b = boss_module.boss
     if b is not None and not b.en_spawn and b.invuln <= 0:
@@ -241,7 +240,7 @@ def tirer_laser(cles, joueur):
         ex, ey, rz, v = projeter_3d_masse(pos)
         if v[0] and rz[0] < config.PORTEE_TIR:
             rayon_screen = config.BOSS_HAUTEUR_CENTRE * config.FOCALE / max(rz[0], 1.0)
-            rayon_screen = min(rayon_screen, 250.0)
+            rayon_screen = min(rayon_screen, 250.0) * aim
             if math.hypot(int(ex[0]) - cx, int(ey[0]) - cy) < rayon_screen:
                 if ligne_de_vue(config.cam_x, config.cam_y, config.cam_z, bx, by, bz):
                     candidats.append({
@@ -257,7 +256,7 @@ def tirer_laser(cles, joueur):
             if not v[i] or rz[i] >= config.PORTEE_TIR:
                 continue
             rayon_screen = 40.0 * config.FOCALE / max(rz[i], 1.0)
-            rayon_screen = max(rayon_screen, 22.0)
+            rayon_screen = max(rayon_screen, 22.0) * aim
             if math.hypot(int(ex[i]) - cx, int(ey[i]) - cy) < rayon_screen:
                 if ligne_de_vue(config.cam_x, config.cam_y, config.cam_z,
                                 float(pos[i][0]), float(pos[i][1]), float(pos[i][2])):
@@ -274,20 +273,101 @@ def tirer_laser(cles, joueur):
     if c["type"] == "boss":
         boss_module.toucher_boss(config.DEGATS_TIR)
         joueur.t_hit = 0.15
+        _zap_chaine(c["obj"], cles, joueur, config.DEGATS_TIR)
         return (c["ex"], c["ey"]), True, False
 
     m = c["obj"]
-    m.hp -= config.DEGATS_TIR
-    m.hit = 0.12
     fin = (c["ex"], c["ey"])
-    if m.hp <= 0:
-        for cle in cles:
-            if m in monstres_caches[cle]:
-                monstres_caches[cle].remove(m)
-                break
-        joueur.kills += 1
-        joueur.t_kill = 0.25
-        deposer_butin(m.x, m.z)
-        return fin, True, True
-    joueur.t_hit = 0.15
-    return fin, True, False
+    _zap_chaine(m, cles, joueur, config.DEGATS_TIR)     # avant la mort : on a besoin de sa position
+    mort = _blesser_monstre(m, config.DEGATS_TIR, cles, joueur)
+    if not mort:
+        joueur.t_hit = 0.15
+    return fin, True, mort
+
+
+# ---------------------------------------------------------------------------
+#  Dégâts partagés : tir, zap_chaine (jambières), dash (torse)
+# ---------------------------------------------------------------------------
+def _blesser_monstre(m, degats, cles, joueur):
+    """Inflige des dégâts à un monstre (kill + butin gérés). -> True s'il est mort."""
+    m.hp -= degats
+    m.hit = 0.12
+    if m.hp > 0:
+        return False
+    for cle in cles:
+        if m in monstres_caches[cle]:
+            monstres_caches[cle].remove(m)
+            break
+    joueur.kills += 1
+    joueur.t_kill = 0.25
+    deposer_butin(m.x, m.z)
+    return True
+
+
+def _boss_ciblable():
+    b = boss_module.boss
+    return b if (b is not None and not b.en_spawn and b.invuln <= 0) else None
+
+
+def _zap_chaine(depart, cles, joueur, degats):
+    """Jambières : l'éclair saute de cible en cible (ZAP_NB sauts, au plus proche à chaque fois),
+    chaque éclair inflige dégâts x(1 + ZAP_BONUS_DEGATS)."""
+    n = config.ZAP_NB
+    if n <= 0:
+        return
+    dmg = degats * (1.0 + config.ZAP_BONUS_DEGATS)
+    cur = (depart.x, _hauteur_centre(depart) if hasattr(depart, "data") else
+           get_hauteur_sol(depart.x, depart.z) - config.BOSS_HAUTEUR_CENTRE, depart.z)
+    touches = {id(depart)}
+    mons = [m for cle in cles for m in monstres_caches[cle]]
+    for _ in range(n):
+        meilleur, d_min = None, config.ZAP_PORTEE
+        for m in mons:
+            if id(m) in touches:
+                continue
+            d = math.hypot(m.x - cur[0], m.z - cur[2])
+            if d < d_min:
+                meilleur, d_min = m, d
+        b = _boss_ciblable()
+        if b is not None and id(b) not in touches and math.hypot(b.x - cur[0], b.z - cur[2]) < d_min:
+            meilleur = b
+        if meilleur is None:
+            break
+        touches.add(id(meilleur))
+        if meilleur is b:
+            boss_module.toucher_boss(dmg)
+            cible = (b.x, get_hauteur_sol(b.x, b.z) - config.BOSS_HAUTEUR_CENTRE, b.z)
+        else:
+            cible = (meilleur.x, _hauteur_centre(meilleur), meilleur.z)
+            _blesser_monstre(meilleur, dmg, cles, joueur)
+        zaps.append([cur[0], cur[1], cur[2], cible[0], cible[1], cible[2], 0.25])
+        cur = cible
+
+
+def mettre_a_jour_zaps(dt):
+    for z in zaps:
+        z[6] -= dt
+    zaps[:] = [z for z in zaps if z[6] > 0]
+
+
+def degats_zone_segment(cles, x0, z0, x1, z1, rayon, degats, joueur):
+    """Dash : blesse tous les monstres (et le boss) à moins de `rayon` du segment. -> nb de cibles."""
+    sx, sz = x1 - x0, z1 - z0
+    l2 = sx * sx + sz * sz or 1.0
+
+    def dist(x, z):
+        t = max(0.0, min(1.0, ((x - x0) * sx + (z - z0) * sz) / l2))
+        return math.hypot(x - (x0 + sx * t), z - (z0 + sz * t))
+
+    nb = 0
+    for m in [m for cle in cles for m in monstres_caches[cle]]:
+        if dist(m.x, m.z) < rayon:
+            _blesser_monstre(m, degats, cles, joueur)
+            nb += 1
+    b = _boss_ciblable()
+    if b is not None and dist(b.x, b.z) < rayon + 60:
+        boss_module.toucher_boss(degats)
+        nb += 1
+    if nb:
+        joueur.t_hit = 0.2
+    return nb
