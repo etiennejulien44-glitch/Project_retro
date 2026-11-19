@@ -1,0 +1,168 @@
+-rendre le terminal plus smooth (peut pratique, difficile de lire (collorer correctements les équipements dans le terminal))
+================================================================================
+GAME DESIGN DOCUMENT : ARBRE DE COMPÉTENCES (FPS SYNTHWAVE / WIREFRAME)
+================================================================================
+
+1. ARCHITECTURE GLOBALE & RÈGLES DU SYSTÈME
+--------------------------------------------------------------------------------
+- Structure : 4 branches de spécialisation (Mobilité, Contrôle, AOE/Portée, Synth).
+- Condition d'activation : Toute compétence au niveau 0 est verrouillée et inutilisable.
+- Viabilité initiale : Chaque compétence possède un multiplicateur de puissance fixe (power_capa) et s'appuie sur la statistique de base du personnage (base_dmg) pour être utilisable dès le début du jeu.
+- Règle d'Ultime : Le joueur ne peut équiper qu'UN SEUL Ultime actif à la fois parmi l'ensemble des 4 branches.
+
+Coûts en Points de Compétence (PC) :
+- Statistique mineure (Dégâts / Rayon / Vitesse) : 1 PC par niveau (Max : 10)
+- Statistique majeure (Power / Pénétration)      : 2 PC par niveau (Max : 10)
+- Compétence standard / passive                  : 3 PC par niveau (Max : 5)
+- Compétence Ultime                              : 5 PC par niveau (Max : 3)
+
+2. LEXIQUE DES VARIABLES & FORMULE UNIVERSELLE
+--------------------------------------------------------------------------------
+Variables globales :
+- base_dmg      : Statistique fondamentale d'attaque intrinsèque au personnage.
+- weapon_dmg    : Dégâts propres à l'arme équipée.
+- stat_dmg      : Points investis dans la statistique de dégâts d'une branche.
+- spec_weight   : Coefficient de spécialisation propre à chaque branche (donne plus de poids aux points spécialisés qu'à base_dmg).
+- power_capa    : Coefficient de puissance fixe propre à chaque compétence active.
+- lvl           : Niveau actuel de la compétence ou de la statistique concernée.
+- current_speed : Vitesse de déplacement réelle du joueur à l'instant T.
+- boss_factor   : 1 pour un ennemi standard ; 30 + (10 * boss_lvl) pour un Boss.
+
+Formule Universelle des Dégâts de Compétence :
+Total_DMG = ((stat_dmg * spec_weight + base_dmg) * power_capa * (1.1 ^ (lvl - 1))) / 100
+
+Coefficients de spécialisation (spec_weight) par branche :
+- Mobilité    : 2.5 (Burst immédiat et prise de risque)
+- AOE/Portée  : 2.0 (Dégâts de zone modérés mais multi-cibles)
+- Contrôle    : 1.8 (Compensé par les altérations d'état et étourdissements)
+- Synth       : 1.5 (Compensé par les dégâts sur la durée et la contagion)
+
+================================================================================
+3. BRANCHE I : MOBILITÉ (Cinétique & Vélocité)
+================================================================================
+Identité visuelle : Traînées néon, flou géométrique, distorsion de FOV.
+Poids de spécialisation (spec_weight) : 2.5
+
+[STATISTIQUES]
+* speed_stat (1 PC/lvl)
+  - Effet : Augmente la vitesse de déplacement de base de +5% par niveau.
+
+* mobility_dmg (1 PC/lvl)
+  - Effet : Ajoute +1 point de statistique de dégâts de mobilité par niveau (multiplié par 2.5 dans la formule universelle).
+
+[COMPÉTENCES]
+* dash (Actif | 3 PC/lvl | CD : 4s)
+  - Effet : Propulse le joueur et inflige des dégâts de zone sur toute la trajectoire parcourue.
+  - Synergie Équipement : L'armure peut confèrer +x lvl gratuit à cette compétence.
+  - Paramètres : power_capa = 120.
+
+* speed_damage (Passif | 3 PC/lvl)
+  - Effet : Augmente la vitesse globale de +8% par niveau et convertit la vélocité actuelle en bonus de dégâts d'arme (weapon_dmg).
+  - Formule : Bonus_DMG = +(0.5% * lvl) par tranche de 10 points de current_speed.
+  - Restriction : Ignore le pic de vitesse instantané généré par le dash (calcule uniquement sur la vitesse de déplacement au moment du tir).
+
+[ULTIME]
+* suppression_rapide (Actif | 5 PC/lvl | CD : 50s)
+  - Effet : Téléporte le joueur d'ennemi en ennemi en infligeant des dégâts à chaque impact. Verrouille l'utilisation du dash pendant toute la durée de l'exécution.
+  - Paramètres : power_capa = 600.
+  - Nombre de sauts : 3 + (2 * lvl) + (2 * dash_lvl).
+  - Algorithme de ciblage (Anti-boucle) : Applique un marqueur invisible (tag_stack = 3) à l'ennemi touché. À chaque téléportation, tous les marqueurs actifs perdent 1 point (disparaissent à 0). Le joueur ne peut se téléporter que sur l'ennemi le plus proche ayant tag_stack == 0.
+  - Synergie speed_damage : Augmente la vitesse théorique calculée de +15% par niveau de speed_damage et booste les dégâts finaux de l'Ultime de +15% par niveau.
+
+================================================================================
+4. BRANCHE II : CONTRÔLE (Altération & Foule)
+================================================================================
+Identité visuelle : Maillage wireframe figé en rouge/cyan, artefacts de pixels, lignes de liaison entre cibles.
+Poids de spécialisation (spec_weight) : 1.8
+
+[STATISTIQUES]
+* control_dmg (1 PC/lvl)
+  - Effet : Ajoute +1 point de statistique de dégâts de contrôle par niveau (multiplié par 1.8 dans la formule universelle) et augmente de +5% par niveau les dégâts subis par les cibles contrôlées.
+
+* control_power (2 PC/lvl)
+  - Effet : Augmente l'indice de puissance de contrôle de +1 par niveau (influence la durée, le rayon, le nombre de cibles et les chances de réussite).
+
+[COMPÉTENCES]
+* controle_passif (Passif | 3 PC/lvl)
+  - Effet : Dès qu'un ennemi entre dans le cône de vision du joueur, il est ralenti de 30% et émet des particules de glitch.
+  - Durée : 5 + (lvl * control_power) secondes.
+  - Bonus / Contrepartie : Les dégâts infligés aux cibles sous controle_passif sont augmentés de (control_dmg * lvl)%, MAIS chaque tir porté sur elles consomme 2 munitions au lieu d'une.
+
+* stacking (Passif / Proc | 3 PC/lvl | CD interne : 3s)
+  - Effet : Chaque tir a une chance d'attirer magnétiquement les ennemis proches vers la cible touchée, les étourdissant pendant 5 secondes.
+  - Probabilité : (lvl * 2) + control_power %.
+  - Cibles attirées : Max(1, control_power / 2) ennemis les plus proches.
+  - Dégâts d'impact : power_capa = 50 + (lvl * 10).
+
+[ULTIME]
+* controle_total (Actif | 5 PC/lvl | CD : 60s)
+  - Effet passif : Affiche en permanence les PV exacts (en valeur numérique) et le taux de réussite de piratage au-dessus des ennemis.
+  - Effet actif : Pirate définitivement l'ennemi visé jusqu'à sa mort. L'ennemi devient un allié wireframe (suit le joueur, attaque les autres ennemis, stats boostées de +50%) et ne peut plus être exécuté par le joueur.
+  - Limite simultanée : control_power ennemis piratés en même temps.
+  - Taux de réussite : Chance (%) = (Pourcentage_PV_manquants / (2 + boss_factor)) * (1 + 0.15 * (lvl - 1)).
+
+================================================================================
+5. BRANCHE III : AOE / PORTÉE (Géométrie & Balistique)
+================================================================================
+Identité visuelle : Ondes de choc vectorielles, lasers de découpe, polygones expansifs.
+Poids de spécialisation (spec_weight) : 2.0
+
+[STATISTIQUES]
+* aoe_dmg (1 PC/lvl)
+  - Effet : Ajoute +1 point de statistique de dégâts de zone par niveau (multiplié par 2.0 dans la formule universelle) et augmente le rayon des zones d'effet de +5% par niveau.
+
+* range_pierce (2 PC/lvl)
+  - Effet : Augmente la portée effective des armes de +15% par niveau et ajoute +1 point de pénétration (traversée d'ennemis et murs fins en wireframe) tous les 3 niveaux.
+
+[COMPÉTENCES]
+* onde_vectorielle (Actif | 3 PC/lvl | CD : 8s)
+  - Effet : Émet une impulsion géométrique au sol qui repousse violemment les ennemis et détruit les projectiles adverses dans un rayon de 5m * (1 + 0.05 * aoe_dmg).
+  - Paramètres : power_capa = 150.
+
+* ricochet_laser (Passif | 3 PC/lvl)
+  - Effet : Les tirs qui touchent un mur ou un ennemi ont (15 * lvl)% de chance de ricocher automatiquement vers une cible dans un rayon de 10m * (1 + 0.05 * aoe_dmg), infligeant 60% des dégâts d'arme initiaux.
+
+[ULTIME]
+* effondrement_polygonal (Actif | 5 PC/lvl | CD : 55s)
+  - Effet : Déploie un dôme wireframe géant pendant 8 secondes. Tous les tirs effectués à l'intérieur du dôme se dupliquent instantanément sur chaque ennemi présent dans la zone (infligeant 40% + 10% * lvl des dégâts d'origine par rayon dupliqué).
+
+================================================================================
+6. BRANCHE IV : SYNTH (Manipulation du Moteur & Corruption)
+================================================================================
+Identité visuelle : Textures manquantes (damier violet/noir), artefacts de rendu, polygones qui se déforment et fondent.
+Poids de spécialisation (spec_weight) : 1.5
+
+[RÈGLE DE LA MÉCANIQUE DE CORRUPTION]
+La Corruption attaque méthodiquement le code des ennemis en 2 phases :
+1. Phase 1 - Injection (Jauge de 0% à 99%) :
+   - L'ennemi subit des dégâts sur la durée (DoT) à chaque tick (1 tick/sec) et est ralenti de 15%.
+   - La jauge progresse à chaque tick selon corruption_power.
+2. Phase 2 - État Corrompu (100% et au-delà) :
+   - L'ennemi est définitivement Corrompu jusqu'à sa mort (immunisé aux effets de la branche Contrôle, ne peut plus se soigner ni dissiper l'état).
+   - Effet proportionnel : L'ennemi subit un malus permanent égal à son pourcentage de corruption accumulé (corruption_rate) :
+     * Dégâts infligés par l'ennemi réduits de corruption_rate %.
+     * Dégâts subis par l'ennemi augmentés de corruption_rate %.
+
+[STATISTIQUES]
+* corruption_dmg (1 PC/lvl)
+  - Effet : Ajoute +1 point de statistique de dégâts de corruption par niveau (multiplié par 1.5 dans la formule universelle).
+
+* corruption_power (2 PC/lvl)
+  - Effet : Augmente la vitesse de progression de la corruption (+5% par tick par niveau) et étend le rayon de contagion de +1 mètre par niveau.
+
+[COMPÉTENCES]
+* corruption_virulente (Actif | 3 PC/lvl | CD : 10s)
+  - Effet : Injecte un virus sur la cible visée.
+  - Nombre de ticks : Max(5, (lvl * corruption_power) / 2).
+  - Dégâts par tick : Formule universelle avec power_capa = 25.
+  - Contagion : Une fois en Phase 2 (Corrompu), l'ennemi transmet automatiquement corruption_virulente à tous les ennemis situés à corruption_power mètres ou moins de lui.
+
+* corruption_accrue (Passif | 3 PC/lvl)
+  - Effet : Modifie le comportement des corruptions du joueur. Désactive totalement la propagation de zone (Contagion), MAIS double la vitesse de progression de la jauge et augmente les dégâts des ticks de +50% par niveau. Permet à corruption_rate de dépasser 100% (jusqu'à 150% max sur cible unique).
+
+[ULTIME]
+* propagation_letale (Actif | 5 PC/lvl | CD : 90s)
+  - Effet : Surcharge le moteur du jeu pendant 12 secondes. Génère une onde au sol qui corrompt instantanément (Phase 2 directe) le décor et tous les ennemis touchés.
+  - Sillage toxique : Les ennemis corrompus laissent derrière eux une traînée de code instable en se déplaçant pendant 5 secondes, contaminant tout ennemi qui la traverse.
+  - Glitch Moteur (Avantage méta) : Pendant la durée de l'Ultime, la gravité du joueur est réduite de 30% et les murs en fil de fer deviennent translucides (permettant de voir les ennemis à travers les parois).
+  - Paramètres : power_capa = 300 (dégâts initiaux de la zone).

@@ -2,6 +2,7 @@
 import math
 import pygame
 from data import config
+from world import inventaire
 
 CYAN = (60, 240, 255)
 ROSE = (255, 60, 200)
@@ -16,12 +17,14 @@ MUZZLE = (config.LARGEUR // 2 + 40, config.HAUTEUR - 110)
 
 class HUD:
     def __init__(self):
-        self.f_petit = pygame.font.Font(None, 26)
-        self.f_moyen = pygame.font.Font(None, 40)
-        self.f_grand = pygame.font.Font(None, 110)
+        k = config.HAUTEUR / 1080.0            # les polices suivent la résolution interne
+        self.f_petit = pygame.font.Font(None, max(16, int(26 * k)))
+        self.f_moyen = pygame.font.Font(None, max(24, int(40 * k)))
+        self.f_grand = pygame.font.Font(None, max(60, int(110 * k)))
         self._cache = {}
-        self.voile = pygame.Surface((config.LARGEUR, config.HAUTEUR), pygame.SRCALPHA)
-        self.voile.fill((10, 0, 25, 175))
+        self.voile = pygame.Surface((config.LARGEUR, config.HAUTEUR))      # alpha global : blit bien plus rapide
+        self.voile.fill((10, 0, 25))
+        self.voile.set_alpha(175)
 
     # -- texte (cache) --
     def _texte(self, txt, police, couleur):
@@ -51,26 +54,15 @@ class HUD:
             oy += 90 * math.sin(math.pi * p)
         x0, y0 = MUZZLE[0], MUZZLE[1] + oy
         H = config.HAUTEUR
+        arme = inventaire.definition(inventaire.possedees.get(inventaire.equipees["arme"]))
+        c1, c2 = arme.get("couleur", CYAN), arme.get("couleur_tir", ROSE)
         corps = [(x0 - 16, y0), (x0 + 16, y0), (x0 + 36, H + 4 + oy), (x0 - 36, H + 4 + oy)]
-        pygame.draw.polygon(surf, SOMBRE, corps)
-        pygame.draw.polygon(surf, CYAN, corps, 2)
-        pygame.draw.line(surf, ROSE, (x0 - 26, y0 + 60), (x0 + 26, y0 + 60), 3)
-        pygame.draw.line(surf, ROSE, (x0 - 30, y0 + 80), (x0 + 30, y0 + 80), 3)
-
-    # -- bonus permanents (haut droite) --
-    def _dessiner_bonus(self, surf, stats):
-        if stats is None:
-            return
-        coul = {"JAUNE": JAUNE, "CYAN": CYAN, "ROSE": ROSE, "BLANC": BLANC}
-        lignes = [(t, coul[c]) for t, c in stats.lignes_hud()]
-        x = config.LARGEUR - 24
-        y = 22
-        for txt, col in lignes:
-            self._ecrire(surf, txt, self.f_petit, col, x, y, "d")
-            y += 26
+        pygame.draw.polygon(surf, c1, corps, 2)                     # fil de fer seul : plus de bloc noir plein
+        pygame.draw.line(surf, c2, (x0 - 26, y0 + 60), (x0 + 26, y0 + 60), 3)
+        pygame.draw.line(surf, c2, (x0 - 30, y0 + 80), (x0 + 30, y0 + 80), 3)
 
     # -- HUD principal --
-    def dessiner(self, surf, j, temps, stats=None):
+    def dessiner(self, surf, j, temps, stats=None, info_boss=None):
         W, H = config.LARGEUR, config.HAUTEUR
         rect, ligne = pygame.draw.rect, pygame.draw.line
 
@@ -134,21 +126,22 @@ class HUD:
         self._ecrire(surf, f"{j.chargeur} / {j.reserve}", self.f_moyen, CYAN, xd, H - 72, "d")
 
         # --- score (haut gauche) ---
-        self._ecrire(surf, f"SCORE  {j.kills * 100}", self.f_moyen, ROSE, 24, 18)
+        self._ecrire(surf, f"SCORE  {j.score}", self.f_moyen, ROSE, 24, 18)
+        if info_boss:
+            self._ecrire(surf, info_boss, self.f_petit, (190, 110, 230), 24, 18 + self.f_moyen.get_height())
 
         # --- message temporaire (centre) ---
         if j.t_message > 0:
             self._ecrire(surf, j.message, self.f_moyen, JAUNE, W // 2, H // 2 + 60, "c")
 
-        # --- bonus cumulés (haut droite) ---
-        self._dessiner_bonus(surf, stats)
+        # (équipement + boosts : ui/panneau_equipement.py)
 
     def dessiner_game_over(self, surf, j, temps):
         W, H = config.LARGEUR, config.HAUTEUR
         surf.blit(self.voile, (0, 0))
         self._ecrire(surf, "GAME OVER", self.f_grand, CYAN, W // 2 + 4, H // 2 - 96, "c")
         self._ecrire(surf, "GAME OVER", self.f_grand, ROSE, W // 2, H // 2 - 100, "c")
-        self._ecrire(surf, f"SCORE  {j.kills * 100}   ({j.kills} ennemis)",
+        self._ecrire(surf, f"SCORE  {j.score}   ({j.kills} ennemis)",
                      self.f_moyen, JAUNE, W // 2, H // 2 + 10, "c")
         if math.sin(temps * 4) > -0.3:
             self._ecrire(surf, "[R] REJOUER      [ECHAP] QUITTER",
@@ -161,7 +154,7 @@ class HUD:
         self._ecrire(surf, "SYSTEME PURGE", self.f_grand, JAUNE, W // 2, H // 2 - 120, "c")
         m, sec = int(duree // 60), int(duree % 60)
         self._ecrire(surf, f"RUN TERMINEE  -  {m:02d}:{sec:02d}", self.f_moyen, BLANC, W // 2, H // 2 - 30, "c")
-        self._ecrire(surf, f"SCORE  {j.kills * 100 + 1000}   ({j.kills} ennemis)",
+        self._ecrire(surf, f"SCORE  {j.score}   ({j.kills} ennemis)",
                      self.f_moyen, JAUNE, W // 2, H // 2 + 20, "c")
         if math.sin(temps * 4) > -0.3:
             self._ecrire(surf, "[R] NOUVELLE RUN      [ECHAP] QUITTER",

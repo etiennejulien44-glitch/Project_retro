@@ -1,0 +1,109 @@
+-rendre le terminal plus smooth (peut pratique, difficile de lire (collorer correctements les équipements dans le terminal))
+
+Avoir un arbre de compétence (4 branches):
+    -mobilité
+    -controle
+    -AOE/porté
+    -synth(jouer avec le moteur du jeux pour obtenir des avantages)
+
+    exemple:
+
+(chaque capacité, compétences aura des dmg minimum fix pour etre utilisable des le début )
+
+compétence dash, (deja implémenté sur armures):
+    inflige des degats dans la zone ou le joueur effectue sa compétence de mobilité
+    ((mobility_damage * 2.5 + base_damage) * power_capa * 1.1^capacity_lvl-1)/100 (sans doute réctifier la formule par la suite a voire)
+armure +1 lvl a la compétence (si compétence lvl 0 = inutilisable)
+
+speed_damage:
+    capcité passive
+    +8% vitesse par lvl (pourra etre ajusté)
+    augementation degats total: augemente les degats de 0.5% par tranche de 10 points de vitesse_acutelle
+    (peut etre combiné avec toutes les compétence (ignore l augementation de vitesse énorme du dash))
+    (donc vitesse acutelle est la vitesse que le joueur possede au moment du tire) (pourra et devra etre ajusté)
+    augementations des degats en fonction de la vitesse du joueur
+
+supression_rapide:
+    si dash est actif le nombre de téléportations augement de 2 pour chaque niveau de dash
+    si speed_damage est actif la vitesse (théorique calculé) pdnt la capacité est augementé de 15% pour chaque lvl de speed_damage
+    pour chaque lvl+1 augemente le nombre de téléportations de base de 2 et les degats boosté de 15%
+    (bloque l utilisation de dash pdnt l utilisation)
+    power:600, cd:50sec
+    ((mobility_damage * 2.5 + base_damage) * power_capa * 1.1^capacity_lvl-1)/100
+    ce téléporte a l ennemie le plus proche, puis enchaine sur l ennemie adjacent (peut cibler le meme ennemie apres 3 saut d ennemie,
+    mettre un marquere invisible sur les ennemies touché a chaque téléportation le marqueure perd 1 disparais a 0, si l ennemie possede un marqueure ne téléporte pas sur l ennemie)
+
+    -mobilité:
+        stats_boosts(1pts par lvl de stats):            compétences(3pts par lvl de compétencs) ultime(coute 5pts pas lvl, 1 seul ultime pour tout l arbre de compétence):
+
+        vitesse +1lvl                                   dash +1lvl                              supression_rapide +1lvl          
+        mobility_damage +1lvl                           speed_damage +1lvl
+
+controle_damage(stats):
+    augemente les dmg des compétences de controle
+    +25% par lvl
+controle_power(stats):
+    force du controle, augemente le temps et l effet du controle
+    augement de 1 pour chaque lvl 
+
+controle_passif:
+    des qu un ennemie rentre dans la vision du joueur,
+    le ralenti pdnt 5+lvl*controle_power sec (affiche des praticules de glitch)
+    pendent cette durée augement également les degats infligé au ennemies de controle_damage * lvl%
+    cependent touchée une cible sous controle_passif coute 2 balles au lieu d une
+
+stacking:
+    a chaque tire a lvl*2+controle_power% de chance de rassembler controle_power/2 ennemies (les plus proches)
+    le sonnant pdnt 5sec et leur inflige lvl*2+controle_power% de dmg
+
+ultime-controle_total:
+    CD: 60s
+    affiche automatiquement les pv ennemie en valeur et la taux de controle
+    permet de controler un ennemie de façon permannente jusqu a sa mort (follow le joueurs) impossible de le supprimer
+    nombres d ennemie_simultanée: controle_power
+    les ennemies controlé sont bcp plus
+    taux de chance de controle (pourcentage de vie enlevé/(2 + bosse_value(zero si il s agit pas d un bosse, 30 bosse lvl 1; + 10 pour chaque lvl)) )
+    -controle:
+        stats_boosts:
+
+        controle_damage +1lvl(1pts)                           controle_passif lvl+1(3pts)               controle_total lvl+1(5pts)
+        controle_power +1lvl(2pts)                            stacking lvl+1(3pts)
+
+Effet des corruption:
+    les corruption attaquent méthodiquement les ennemies
+    une corruption classique ce fait en 2 stade
+    corruption en cours:
+        qui inflige des Dots tout en ralentissent l ennemie pdnt une certains période
+    corruompu a x%:
+        la corrumption dure un certains temps plus elle dure longtemps plus l effet corompu est fort:
+        par exemple si la corruption a atteind 23%, les dégats qu il inflige seront réduit de 23% et les dégats
+        subis pas l ennemie sera également augementé de 23%
+    une corruption est calculé de cette façon
+        le nombre de tick de Dots
+        la vitesse de progression
+        les degats infligé
+
+corruption_damage(stats):
+    augemente de X pour chaques lvl
+corruption_power(stats):
+    augement de X pour chaque lvl
+corruption_virulante:
+    corromp un ennemi (dans l etat corrompu l ennemie ne peut plus etre controlé ni ce remettre de cette état)
+    tick : (lvl * corruption_power)/2 min 5
+    dots_damage: base_damage*corruption_damage
+    une fois dans l états corrompu, pour chaque ennemie a corruption_power ou moin en metre de lui lui propage la capacité
+corruption_accrue()
+    similaire a corruption_virulante mais ne peut pas ce propager en revange inflige bcp plus de dmg
+
+Propagation_lethal:
+    une corruption extrem, qui ce répend directement par la map
+    elle corromp des zone tout ce qui entre en contacte son automatiquement corrompu
+    les ennemies corompu une fois dans l etats corrompu contamineron la zone en ce déplacent (peut aussi affecter le jeux)
+    DMG élevé
+    Propagation rapide
+    CD:90s
+
+synth:
+    
+        corruption_damage +1lvl                               corruption_virulante()                    Propagation_lethal(7pts)
+        corruption_power +1lvl                                corruption_accrue()

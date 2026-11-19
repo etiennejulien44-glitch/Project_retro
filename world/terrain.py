@@ -478,6 +478,33 @@ def bloque_segment(x0, y0, z0, x1, y1, z1):
     return bool(np.any((d2 < s[:, 2] ** 2) & (ys > s[:, 3])))
 
 
+def bloque_points(xs, ys, zs):
+    """Version vectorisée de bloque_point : tableaux de points -> tableau de booléens."""
+    s = _etat["solides"]
+    xs = np.asarray(xs)
+    if not len(s) or xs.size == 0:
+        return np.zeros(xs.shape, dtype=bool)
+    d2 = (xs[:, None] - s[None, :, 0]) ** 2 + (np.asarray(zs)[:, None] - s[None, :, 1]) ** 2
+    return np.any((d2 < s[None, :, 2] ** 2) & (np.asarray(ys)[:, None] > s[None, :, 3]), axis=1)
+
+
+def prechauffer(cam_cx, cam_cz, portee):
+    """Génère AU PLUS UN chunk de l'anneau juste au-delà de la zone visible (géométrie + contenu).
+    Appelé à chaque frame : le franchissement d'une frontière de chunk ne provoque plus de saccade,
+    car les chunks voisins sont déjà prêts. -> True si un chunk a été préparé."""
+    p = portee + 1
+    for cx in range(cam_cx - p, cam_cx + p + 1):
+        for cz in range(cam_cz - p, cam_cz + p + 1):
+            if (cx, cz) not in _cache_geo_chunks:
+                _geo_chunk(cx, cz)
+                get_elements_chunk(cx, cz)
+                return True
+            if (cx, cz) not in monstres_caches:
+                get_elements_chunk(cx, cz)
+                return True
+    return False
+
+
 def repousser(x, z, y_pied, marge=18.0):
     """Empêche le joueur de traverser les décors solides."""
     s = _etat["solides"]

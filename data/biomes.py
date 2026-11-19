@@ -2,7 +2,7 @@
 # ============================================================================
 #  AJOUTER UN BIOME = ajouter UNE entrée dans BIOMES. Rien d'autre.
 #    couche          : profondeur (0 = départ, puis 1, 2, 3...) -> sa place dans la progression
-#    monstres_spawn  : clés de data/bestiaire.py
+#    monstres        : DÉRIVÉ automatiquement : chaque monstre déclare ses biomes (champ "biomes" de data/monstres.py)
 #    poids_coffres   : clés de data/coffres.py
 #    decors          : {id_decor: nombre par chunk} (data/decors.py) -> relief, couverts, identité
 #  Les couches/numéros se règlent en bas du fichier.
@@ -17,7 +17,6 @@ BIOMES = {
         "type_relief": "lisse",          # Relief vagues douces
         "decors": {"arbre": 2, "bloc_data": 3},
         "poids_coffres": {"classique": 0.85, "prismatique": 0.15, "military": 0.2},
-        "monstres_spawn": ["araignee", "drone"],
         "couleur_grille": (255, 0, 128),
         "couleur_brouillard": (20, 0, 40),
         "couleur_ciel": (10, 0, 20),
@@ -32,7 +31,6 @@ BIOMES = {
         "type_relief": "abrupte",        # Relief cassé, géométrique, marches d'escalier
         "decors": {"mur_ruine": 5, "arbre": 1},
         "poids_coffres": {"classique": 0.7, "prismatique": 0.30},
-        "monstres_spawn": ["drone", "tourelle"],
         "couleur_grille": (0, 255, 200),
         "couleur_brouillard": (10, 30, 20),
         "couleur_ciel": (5, 15, 10),
@@ -47,7 +45,6 @@ BIOMES = {
         "type_relief": "abrupte",
         "decors": {"monolithe": 4, "bloc_data": 2},
         "poids_coffres": {"classique": 0.8, "prismatique": 0.20},
-        "monstres_spawn": ["glitch", "glitch", "drone", "araignee"],
         "couleur_grille": (200, 60, 255),
         "couleur_brouillard": (30, 0, 50),
         "couleur_ciel": (18, 0, 30),
@@ -62,7 +59,6 @@ BIOMES = {
         "type_relief": "lisse",
         "decors": {"rack_serveur": 4, "tour_chauffe": 2},
         "poids_coffres": {"classique": 0.65, "prismatique": 0.35},
-        "monstres_spawn": ["tourelle", "araignee", "araignee", "drone"],
         "couleur_grille": (255, 140, 0),
         "couleur_brouillard": (40, 18, 0),
         "couleur_ciel": (25, 10, 0),
@@ -77,7 +73,6 @@ BIOMES = {
         "type_relief": "abrupte",
         "decors": {"obelisque": 3, "cristal": 6},
         "poids_coffres": {"classique": 0.5, "prismatique": 0.50, "military": 0.2},
-        "monstres_spawn": ["glitch", "tourelle", "drone"],
         "couleur_grille": (0, 255, 100),
         "couleur_brouillard": (0, 12, 6),
         "couleur_ciel": (0, 4, 2),
@@ -101,3 +96,18 @@ JITTER_FRONTIERE = 0.45         # +- irrégularité des frontières, en régions
 CHANCE_VARIANTE = 0.25          # proba qu'une région prenne un biome voisin
 RAYON_COUCHE_0 = 1.0            # rayon (en régions) autour du départ forcé en couche 0, sans variante
 
+
+
+# ---------------------------------------------------------------------------
+#  Table d'apparition de chaque biome, DÉRIVÉE des monstres (poids = répétitions dans la liste).
+#  Un biome peut aussi lister "monstres_spawn": [...] à la main : ces clés s'ajoutent.
+# ---------------------------------------------------------------------------
+from data.monstres import MONSTRES as _MONSTRES
+
+for _id, _b in BIOMES.items():
+    _spawn = list(_b.get("monstres_spawn", []))
+    for _cle, _m in _MONSTRES.items():
+        _spawn += [_cle] * int(_m["biomes"].get(_id, 0))
+    if not _spawn:
+        raise ValueError(f"data/biomes.py -> biome '{_id}' : aucun monstre n'y apparaît (voir champ 'biomes' de data/monstres.py)")
+    _b["monstres_spawn"] = _spawn

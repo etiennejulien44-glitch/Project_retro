@@ -6,7 +6,7 @@
 #    table             : nom de la table de butin (voir "tables" dans data/boosts.py)
 #    nb_butins         : (optionnel, défaut 1) nombre d'objets dans le coffre
 #    rarete_biais      : (optionnel) {rarete: multiplicateur} pour les équipements tirés ici
-#                        (rarete = commun / rare / leg / mythique / special, voir data/equipements.py)
+#                        (rarete = commun / rare / leg / mythique / special, voir data/raretes.py)
 #  Pour qu'il apparaisse : ajoute son poids dans "poids_coffres" d'un biome (data/biomes.py).
 # ============================================================================
 from data.modeles import MODELE_CHEST, PRISMATIC_CHEST

@@ -1,0 +1,26 @@
+-corruptions pas fonctionelle sur les bosses (en tout cas impossible de targer le 1e boss avec)
+-implémenter rm * (qui supprime tout sauf équipements porté & demendé confirmation)
+$rm *
+voulez vous supprmier tout vos items non équipé ?
+[Y] [N]
+(une fois supprimer donne des munitions en fonction de la rarté des équipements détruit)
+qd une manipulation est fait dans le terminal mettre une animation de barre de chargement pour l eshtétique
+puis mettre un message
+armes parfaitement téléchargé dans le slot X
+ou bien point de compétence correctement transférée
+qlq chose comme sa
+Important: 
+    terminal relativement peut pratique, permettre au joueurs d utiliser le mode fast dans le terminal
+    set fastmode
+    le fast mode:
+        fait toujours un ls qd ont ouvre une fichier
+        permet de cliquer sur les éléments, séléctionner les folder pour les ouvrire etc & également 
+
+permettre de déplacer son curseur dans le terminal avec les fleche pour éditer son message au cas ou faut de frappe
+-> la porpagation de corruption ne fonctionne pas (ou a vrmnt tres peut de portée)
+-> jeu est code pour le moment toujour chaotique rendre le tout plus lisse 
+-> certaines compétences ne touche pas les bosses
+-> cube rotatif BCP trop difficile, attaque casi inesquivable car permannente qd il est sur le point de mourrire,
+Nouvelle substats a implémenter sur les équipements
+il sera mtn possible d avoir des équipements qui possede drain de vie (permet de régénéré via un % age de dmg infligé)
+arme (manque curellement de dégats par rapport au compétence qui pour le moment ont lair plus ou moin équilibrée)

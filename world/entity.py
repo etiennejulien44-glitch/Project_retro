@@ -1,17 +1,23 @@
 # world/entity.py
 from data import boosts
+from world import butin
 import math
 import random
 import time
 import numpy as np
 from data import config
 from world import boss as boss_module
+from world import balistique
+from world.monstre import ABSORBE
 from .terrain import get_hauteur_sol, monstres_caches, bloque_point, bloque_segment
 from engine.renderer import projeter_3d_masse
+from engine import effets, rendu_monstres
+from engine.geometrie import diff_angle
 
 projectiles = []
 pickups = []       # [x, z, type, spawn_time]
 zaps = []          # éclairs du zap_chaine : [x1, y1, z1, x2, y2, z2, durée_restante]
+monstres_actifs = []   # monstres des chunks chargés, recalculé 1 fois par frame (mettre_a_jour_monstres)
 
 DELAI_RAMASSAGE = 0.6
 
@@ -32,6 +38,8 @@ class Joueur:
         self.message = ""
         self.t_message = 0.0
         self.kills = 0
+        self.score = 0
+        self.facteur_source = 1.0
         self.mort = False
 
     def progression_recharge(self):
@@ -45,6 +53,9 @@ class Joueur:
 
     def prendre_degats(self, n):
         if self.mort:
+            return
+        n = n * self.facteur_source               # dégâts infligés réduits par la Corruption (world/competences.py)
+        if n <= 0:
             return
         if config.REDUCTION_DEGATS > 0:           # armures : casque / jambières / bottes...
             n = max(1, int(round(n * (1.0 - config.REDUCTION_DEGATS))))
@@ -107,6 +118,8 @@ def reinitialiser_entites():
     projectiles.clear()
     pickups.clear()
     zaps.clear()
+    monstres_actifs.clear()
+    effets.reinitialiser()
 
 
 def ligne_de_vue(x0, y0, z0, x1, y1, z1, n=14):
@@ -145,7 +158,7 @@ def mettre_a_jour_pickups(joueur, dt, stats):
         d = math.hypot(p[0] - config.cam_x, p[1] - config.cam_z)
 
         if d < config.RAYON_RAMASSAGE_BUTINS:
-            if not boosts.appliquer(boosts.PICKUP_IDS[int(p[2])], stats, joueur):
+            if not butin.appliquer(boosts.PICKUP_IDS[int(p[2])], stats, joueur):
                 restants.append(p)        # plein : reste au sol
             continue
 
@@ -157,47 +170,220 @@ def _hauteur_centre(m):
     return get_hauteur_sol(m.x, m.z) + m.data.get("hauteur_centre", -20)
 
 
+# ===========================================================================
+#  IA DES MONSTRES -- registre de comportements
+#  data/monstres.py -> "comportement": "nom"   <->   @comportement("nom") ci-dessous.
+#  Une IA reçoit (monstre, dt, joueur, temps) et pilote m.x / m.z / m.etat / m.t_etat.
+# ===========================================================================
+COMPORTEMENTS = {}
+
+
+def comportement(nom):
+    def deco(f):
+        COMPORTEMENTS[nom] = f
+        return f
+    return deco
+
+
 def mettre_a_jour_monstres(dt, cles, joueur, temps):
-    cx, cz = config.cam_x, config.cam_z
-    for cle in cles:
-        for m in monstres_caches[cle]:
-            m.hit = max(0.0, m.hit - dt)
-            dx, dz = cx - m.x, cz - m.z
-            d = math.hypot(dx, dz)
+    global monstres_actifs
+    monstres_actifs = [m for cle in cles for m in monstres_caches[cle]]
+    for m in monstres_actifs:
+        m.hit = max(0.0, m.hit - dt)
+        if m.allie:
+            _ia_allie(m, dt, joueur, temps, cles)
+            continue
+        if m.ralenti <= 0.0:
+            continue                                         # étourdi
+        joueur.facteur_source = m.mult_inf
+        COMPORTEMENTS[m.data["comportement"]](m, dt * m.ralenti, joueur, temps)
+    joueur.facteur_source = 1.0
 
-            if m.data["comportement"] == "melee":
-                if d >= m.data["aggro"]:
-                    continue
-                if d > m.data["portee"]:
-                    m.x += dx / d * m.data["vitesse"] * dt
-                    m.z += dz / d * m.data["vitesse"] * dt
-                    m.cd = max(m.cd, 0.4)
-                else:
-                    m.cd -= dt
-                    if m.cd <= 0:
-                        joueur.prendre_degats(m.data["degats"])
-                        m.cd = m.data["cooldown"]
-            else:
-                if d >= m.data["aggro"] or d < 1e-6:
-                    continue
-                v = m.data["vitesse"] * dt
-                dist_pref = m.data.get("dist_pref", 80.0)
 
-                if d > dist_pref + 80:
-                    m.x += dx / d * v
-                    m.z += dz / d * v
-                elif d < dist_pref - 150:
-                    m.x -= dx / d * v
-                    m.z -= dz / d * v
-                lat = math.sin(temps * 0.8 + m.phase) * v * 0.7
-                m.x += -dz / d * lat
-                m.z += dx / d * lat
+@comportement("melee")
+def _ia_melee(m, dt, joueur, temps):
+    dx, dz = config.cam_x - m.x, config.cam_z - m.z
+    d = math.hypot(dx, dz)
+    if d >= m.data["aggro"]:
+        return
+    if d > m.data["portee"]:
+        m.x += dx / d * m.data["vitesse"] * dt
+        m.z += dz / d * m.data["vitesse"] * dt
+        m.cd = max(m.cd, 0.4)
+    else:
+        m.cd -= dt
+        if m.cd <= 0:
+            joueur.prendre_degats(m.data["degats"])
+            m.cd = m.data["cooldown"]
 
-                m.cd -= dt
-                portee_maximale = m.data.get("portee_tir", 150.0)
-                if m.cd <= 0 and d < portee_maximale and not joueur.mort:
-                    _tirer_projectile(m)
-                    m.cd = m.data["cooldown"] + random.random() * 0.8
+
+@comportement("distance")
+def _ia_distance(m, dt, joueur, temps):
+    dx, dz = config.cam_x - m.x, config.cam_z - m.z
+    d = math.hypot(dx, dz)
+    if d >= m.data["aggro"] or d < 1e-6:
+        return
+    v = m.data["vitesse"] * dt
+    dist_pref = m.data.get("dist_pref", 80.0)
+
+    if d > dist_pref + 80:
+        m.x += dx / d * v
+        m.z += dz / d * v
+    elif d < dist_pref - 150:
+        m.x -= dx / d * v
+        m.z -= dz / d * v
+    lat = math.sin(temps * 0.8 + m.phase) * v * 0.7
+    m.x += -dz / d * lat
+    m.z += dx / d * lat
+
+    m.cd -= dt
+    portee_maximale = m.data.get("portee_tir", 150.0)
+    if m.cd <= 0 and d < portee_maximale and not joueur.mort:
+        _tirer_projectile(m)
+        m.cd = m.data["cooldown"] + random.random() * 0.8
+
+
+@comportement("striker")
+def _ia_striker(m, dt, joueur, temps):
+    """Ligne électrique : repos -> vise (se verrouille juste avant de partir) -> fonce en ligne droite -> repos."""
+    D = m.data
+    dx, dz = config.cam_x - m.x, config.cam_z - m.z
+    d = math.hypot(dx, dz) or 1e-6
+    m.t_etat -= dt
+    if m.etat == "repos":
+        if d < D["aggro"]:
+            m.dir_x, m.dir_z = dx / d, dz / d
+            if m.t_etat <= 0 and not joueur.mort:
+                m.etat, m.t_etat = "vise", D["duree_vise"]
+    elif m.etat == "vise":
+        if m.t_etat > D["verrou"]:                          # suit le joueur... jusqu'au verrouillage
+            m.dir_x, m.dir_z = dx / d, dz / d
+        if m.t_etat <= 0:
+            m.etat, m.t_etat = "fonce", D["duree_charge"]
+    elif m.etat == "fonce":
+        pas = D["vitesse_charge"] * dt
+        nx, nz = m.x + m.dir_x * pas, m.z + m.dir_z * pas
+        y = float(get_hauteur_sol(nx, nz)) + D["hauteur_centre"]
+        fini = False
+        if bloque_point(nx, y, nz):                          # un couvert l'arrête (et l'éclate en étincelles)
+            effets.etincelles((m.x, y, m.z), D["couleur"], n=8)
+            fini = True
+        else:
+            m.x, m.z = nx, nz
+            if (math.hypot(config.cam_x - m.x, config.cam_z - m.z) < D["rayon_contact"]
+                    and abs(config.cam_y - y) < 55 and not joueur.mort):
+                joueur.prendre_degats(D["degats"])
+                effets.etincelles((m.x, y, m.z), (255, 40, 40), n=10)
+                fini = True
+        if fini or m.t_etat <= 0:
+            m.etat, m.t_etat = "repos", D["cooldown"]
+
+
+@comportement("shield")
+def _ia_shield(m, dt, joueur, temps):
+    """Polygone Shield : présente toujours une face DEBOUT vers le joueur, mais pivote lentement :
+    il faut lui tourner autour pour viser une face détruite et toucher le coeur."""
+    D = m.data
+    dx, dz = config.cam_x - m.x, config.cam_z - m.z
+    d = math.hypot(dx, dz)
+    if d >= D["aggro"] or d < 1e-6:
+        return
+    phi = math.atan2(dx, dz)
+    n = len(m.faces)
+    pas = 2 * math.pi / n
+    debout = [i for i in range(n) if m.faces[i]]
+    cible = m.rot
+    if debout:
+        meilleure = min(debout, key=lambda i: abs(diff_angle(phi - i * pas, m.rot)))
+        cible = phi - meilleure * pas
+    delta = diff_angle(cible, m.rot)
+    maxi = D["vit_rot"] * dt
+    m.rot += max(-maxi, min(maxi, delta))
+    if d > D["portee"]:
+        m.x += dx / d * D["vitesse"] * dt
+        m.z += dz / d * D["vitesse"] * dt
+        m.cd = max(m.cd, 0.4)
+    else:
+        m.cd -= dt
+        if m.cd <= 0 and not joueur.mort:
+            joueur.prendre_degats(D["degats"])
+            m.cd = D["cooldown"]
+
+
+@comportement("phasme")
+def _ia_phasme(m, dt, joueur, temps):
+    """Traqueur de grille : voyage SOUS le sol (distorsion visible dans le maillage, intouchable),
+    surgit au dernier moment, mord, reste exposé un instant puis replonge."""
+    D = m.data
+    dx, dz = config.cam_x - m.x, config.cam_z - m.z
+    d = math.hypot(dx, dz) or 1e-6
+    m.t_etat -= dt
+    if m.etat == "traque":
+        m.y_haut = 0.0
+        if d < D["aggro"]:
+            v = D["vitesse"] * (D["bonus_proche"] if d < D["dist_rush"] else 1.0) * dt
+            lat = math.sin(temps * 3.0 + m.phase) * 0.5          # trajectoire sinueuse
+            ux, uz = dx / d, dz / d
+            m.x += (ux - uz * lat) * v
+            m.z += (uz + ux * lat) * v
+            if d < D["dist_surgir"] and m.t_etat <= 0 and not joueur.mort:
+                m.etat, m.t_etat = "surgit", D["duree_surgit"]
+                effets.onde(m.x, m.z, amp=config.ONDE_MORT_AMP * 0.7)
+    elif m.etat == "surgit":
+        m.y_haut = min(1.0, 1.0 - m.t_etat / D["duree_surgit"])
+        if m.t_etat <= 0:
+            m.etat, m.t_etat, m.y_haut, m.cd = "surgi", D["duree_expose"], 1.0, D["cooldown_attaque"] * 0.5
+            effets.etincelles((m.x, float(get_hauteur_sol(m.x, m.z)) - 20, m.z), D["couleur"], n=10)
+            if d < D["portee_attaque"] and not joueur.mort:
+                joueur.prendre_degats(D["degats"])
+    elif m.etat == "surgi":
+        m.cd -= dt
+        if m.cd <= 0 and d < D["portee_attaque"] and not joueur.mort:
+            joueur.prendre_degats(D["degats"])
+            m.cd = D["cooldown_attaque"]
+        if m.t_etat <= 0:
+            m.etat, m.t_etat = "plonge", D["duree_plonge"]
+    elif m.etat == "plonge":
+        m.y_haut = max(0.0, m.t_etat / D["duree_plonge"])
+        if m.t_etat <= 0:
+            m.etat, m.t_etat, m.y_haut = "traque", D["cooldown"], 0.0
+
+
+def _ia_allie(m, dt, joueur, temps, cles):
+    """Ennemi piraté (Contrôle total) : attaque l'ennemi le plus proche, sinon suit le joueur. Stats +50%."""
+    D = m.data
+    vit = max(120.0, float(D.get("vitesse", 0.0))) * 1.5
+    cible, dmin = None, 900.0
+    for autre in monstres_actifs:
+        if autre is m or autre.allie:
+            continue
+        d = math.hypot(autre.x - m.x, autre.z - m.z)
+        if d < dmin:
+            cible, dmin = autre, d
+    if cible is not None:
+        tx, tz, portee = cible.x, cible.z, 70.0
+    else:
+        tx, tz, portee = config.cam_x, config.cam_z, 160.0     # reste près du joueur
+    dx, dz = tx - m.x, tz - m.z
+    d = math.hypot(dx, dz) or 1e-6
+    if d > portee:
+        m.x += dx / d * vit * dt
+        m.z += dz / d * vit * dt
+    elif cible is not None:
+        m.cd -= dt
+        if m.cd <= 0:
+            m.cd = D.get("cooldown", 1.2)
+            _blesser_monstre(cible, float(D.get("degats", 6)) * 1.5, cles, joueur, m.x, m.z)
+
+
+def sources_distorsion():
+    """Distorsions continues pour la grille : [(x, z, amplitude, sigma)] (monstres à champ "distorsion")."""
+    res = []
+    for m in monstres_actifs:
+        dist = m.data.get("distorsion")
+        if dist and m.etat != "surgi":
+            res.append((m.x, m.z, dist["amp"] * (1.0 - m.y_haut), dist["sigma"]))
+    return res
 
 
 def _tirer_projectile(m):
@@ -205,101 +391,153 @@ def _tirer_projectile(m):
     dx, dy, dz = config.cam_x - x, config.cam_y - y, config.cam_z - z
     n = math.sqrt(dx * dx + dy * dy + dz * dz) or 1.0
     v = config.PROJECTILE_VITESSE
-    projectiles.append([x, y, z, dx / n * v, dy / n * v, dz / n * v, config.PROJECTILE_VIE])
+    projectiles.append([x, y, z, dx / n * v, dy / n * v, dz / n * v, config.PROJECTILE_VIE,
+                        config.PROJECTILE_DEGATS * m.mult_inf])
 
 
 def mettre_a_jour_projectiles(dt, joueur):
-    r2 = config.PROJECTILE_RAYON ** 2
-    vivants = []
-    for p in projectiles:
-        p[0] += p[3] * dt
-        p[1] += p[4] * dt
-        p[2] += p[5] * dt
-        p[6] -= dt
-        if p[6] <= 0 or p[1] > get_hauteur_sol(p[0], p[2]) or bloque_point(p[0], p[1], p[2]):
-            continue
-        dx, dy, dz = p[0] - config.cam_x, p[1] - config.cam_y, p[2] - config.cam_z
-        if dx * dx + dy * dy + dz * dz < r2:
-            joueur.prendre_degats(config.PROJECTILE_DEGATS)
-            continue
-        vivants.append(p)
-    projectiles[:] = vivants
+    balistique.avancer(projectiles, dt, joueur, config.PROJECTILE_RAYON ** 2)
 
 
-def tirer_laser(cles, joueur):
+def _impact_sol():
+    """Point où le rayon de visée (centre de l'écran) touche le sol, ou None (tir dans le ciel)."""
+    yaw, pit = math.radians(config.yaw), math.radians(config.pitch)
+    fx, fy, fz = math.cos(pit) * math.sin(yaw), math.sin(pit), math.cos(pit) * math.cos(yaw)
+    t = np.linspace(40.0, config.PORTEE_TIR, 28)
+    xs, ys, zs = config.cam_x + fx * t, config.cam_y + fy * t, config.cam_z + fz * t
+    g = ys - get_hauteur_sol(xs, zs)                         # > 0 : sous le sol (Y vers le bas)
+    bas = g > 0
+    if not bas.any():
+        return None
+    i = int(np.argmax(bas))
+    f = 0.0 if i == 0 else float(-g[i - 1] / (g[i] - g[i - 1]))
+    j = max(i - 1, 0)
+    return (float(xs[j] + (xs[i] - xs[j]) * f), float(ys[j] + (ys[i] - ys[j]) * f), float(zs[j] + (zs[i] - zs[j]) * f))
+
+
+# Modificateurs de tir posés par world/competences.py avant chaque tir (portée, pénétration)
+tir_mod = {"portee": 1.0, "penetration": 0}
+dernier_tir = {"cible": None, "pos": None}       # lu par world/competences.py (ricochet, stacking, dôme)
+
+
+def _candidats(cles):
+    """Tout ce qui est sous le réticule : boss, satellites, monstres (triés plus tard par distance)."""
     cx, cy = config.LARGEUR // 2, config.HAUTEUR // 2
     candidats = []
     aim = 1.0 + config.AUTO_AIM * config.AUTO_AIM_RAYON       # casque : aide à la visée
+    F = config.FOCALE
+    portee = config.PORTEE_TIR * tir_mod["portee"]
+    traverse = tir_mod["penetration"] > 0                      # pénétration : on tire à travers les couverts
 
-    b = boss_module.boss
-    if b is not None and not b.en_spawn and b.invuln <= 0:
-        bx = b.x
-        by = get_hauteur_sol(b.x, b.z) - config.BOSS_HAUTEUR_CENTRE
-        bz = b.z
-        pos = np.array([[bx, by, bz]], dtype=np.float32)
-        ex, ey, rz, v = projeter_3d_masse(pos)
-        if v[0] and rz[0] < config.PORTEE_TIR:
-            rayon_screen = config.BOSS_HAUTEUR_CENTRE * config.FOCALE / max(rz[0], 1.0)
-            rayon_screen = min(rayon_screen, 250.0) * aim
+    b = _boss_ciblable()
+    if b is not None:
+        bx, by, bz = b.centre()
+        ex, ey, rz, v = projeter_3d_masse(np.array([[bx, by, bz]], dtype=np.float32))
+        if v[0] and rz[0] < portee:
+            rayon_screen = min(b.rayon_visee * F / max(rz[0], 1.0), 250.0) * aim
             if math.hypot(int(ex[0]) - cx, int(ey[0]) - cy) < rayon_screen:
-                if ligne_de_vue(config.cam_x, config.cam_y, config.cam_z, bx, by, bz):
-                    candidats.append({
-                        "type": "boss", "obj": b,
-                        "ex": int(ex[0]), "ey": int(ey[0]), "rz": float(rz[0]),
-                    })
+                if traverse or ligne_de_vue(config.cam_x, config.cam_y, config.cam_z, bx, by, bz):
+                    candidats.append({"type": "boss", "obj": b, "ex": int(ex[0]), "ey": int(ey[0]),
+                                      "rz": float(rz[0]), "pos": (bx, by, bz)})
 
-    mons = [m for cle in cles for m in monstres_caches[cle]]
+    for sat in boss_module.satellites_ciblables():             # tourelles satellites du boss
+        ex, ey, rz, v = projeter_3d_masse(np.array([[sat.x, sat.y, sat.z]], dtype=np.float32))
+        if v[0] and rz[0] < portee:
+            rayon_screen = max(30.0 * F / max(rz[0], 1.0), 22.0) * aim
+            if math.hypot(int(ex[0]) - cx, int(ey[0]) - cy) < rayon_screen:
+                candidats.append({"type": "satellite", "obj": sat, "ex": int(ex[0]), "ey": int(ey[0]),
+                                  "rz": float(rz[0]), "pos": (sat.x, sat.y, sat.z)})
+
+    mons = [m for cle in cles for m in monstres_caches[cle] if m.ciblable]
     if mons:
-        pos = np.array([[m.x, _hauteur_centre(m), m.z] for m in mons], dtype=np.float32)
+        xs = np.fromiter((m.x for m in mons), np.float64, len(mons))
+        zs = np.fromiter((m.z for m in mons), np.float64, len(mons))
+        hc = np.fromiter((m.data.get("hauteur_centre", -20) for m in mons), np.float64, len(mons))
+        ray = np.fromiter((m.data.get("rayon_visee", 40.0) for m in mons), np.float64, len(mons))
+        pos = np.column_stack((xs, get_hauteur_sol(xs, zs) + hc, zs)).astype(np.float32)
         ex, ey, rz, v = projeter_3d_masse(pos)
-        for i, m in enumerate(mons):
-            if not v[i] or rz[i] >= config.PORTEE_TIR:
-                continue
-            rayon_screen = 40.0 * config.FOCALE / max(rz[i], 1.0)
-            rayon_screen = max(rayon_screen, 22.0) * aim
-            if math.hypot(int(ex[i]) - cx, int(ey[i]) - cy) < rayon_screen:
-                if ligne_de_vue(config.cam_x, config.cam_y, config.cam_z,
-                                float(pos[i][0]), float(pos[i][1]), float(pos[i][2])):
-                    candidats.append({
-                        "type": "monstre", "obj": m,
-                        "ex": int(ex[i]), "ey": int(ey[i]), "rz": float(rz[i]),
-                    })
+        rayon_screen = np.maximum(ray * F / np.maximum(rz, 1.0), 22.0) * aim
+        ok = v & (rz < portee) & (np.hypot(ex - cx, ey - cy) < rayon_screen)
+        for i in np.nonzero(ok)[0].tolist():
+            if traverse or ligne_de_vue(config.cam_x, config.cam_y, config.cam_z,
+                                        float(pos[i][0]), float(pos[i][1]), float(pos[i][2])):
+                candidats.append({"type": "monstre", "obj": mons[i], "ex": int(ex[i]), "ey": int(ey[i]),
+                                  "rz": float(rz[i]), "pos": tuple(pos[i].tolist())})
+    candidats.sort(key=lambda x: x["rz"])
+    return candidats
 
+
+def cible_visee(cles):
+    """Monstre sous le réticule (le plus proche), ou None. Sert aux compétences ciblées (virus, piratage)."""
+    for c in _candidats(cles):
+        if c["type"] == "monstre":
+            return c["obj"]
+    return None
+
+
+def tirer_laser(cles, joueur):
+    candidats = _candidats(cles)
+    dernier_tir["cible"], dernier_tir["pos"] = None, None
     if not candidats:
+        imp = _impact_sol()                                  # tir raté : impact + onde dans la grille
+        if imp is not None:
+            dernier_tir["pos"] = imp
+            effets.etincelles(imp, (60, 240, 255), n=4, vitesse=170.0, taille=6.0)
+            effets.onde(imp[0], imp[2], amp=config.ONDE_TIR_AMP * 0.8)
         return None, False, False
 
-    c = min(candidats, key=lambda x: x["rz"])
-
-    if c["type"] == "boss":
-        boss_module.toucher_boss(config.DEGATS_TIR)
-        joueur.t_hit = 0.15
-        _zap_chaine(c["obj"], cles, joueur, config.DEGATS_TIR)
-        return (c["ex"], c["ey"]), True, False
-
-    m = c["obj"]
-    fin = (c["ex"], c["ey"])
-    _zap_chaine(m, cles, joueur, config.DEGATS_TIR)     # avant la mort : on a besoin de sa position
-    mort = _blesser_monstre(m, config.DEGATS_TIR, cles, joueur)
-    if not mort:
-        joueur.t_hit = 0.15
-    return fin, True, mort
+    fin, mort_premier = None, False
+    for k, c in enumerate(candidats[:1 + tir_mod["penetration"]]):       # pénétration : le tir traverse N cibles
+        if c["type"] == "boss":
+            boss_module.toucher_boss(config.DEGATS_TIR)
+            joueur.t_hit = 0.15
+            effets.etincelles(c["pos"], (255, 30, 30), n=6)
+            _zap_chaine(c["obj"], cles, joueur, config.DEGATS_TIR)
+            mort = False
+        elif c["type"] == "satellite":
+            boss_module.toucher_satellite(c["obj"], config.DEGATS_TIR, joueur)
+            joueur.t_hit = 0.15
+            mort = False
+        else:
+            m = c["obj"]
+            _zap_chaine(m, cles, joueur, config.DEGATS_TIR)     # avant la mort : on a besoin de sa position
+            mort = _blesser_monstre(m, config.DEGATS_TIR, cles, joueur)
+            if not mort:
+                joueur.t_hit = 0.15
+        if k == 0:
+            fin, mort_premier = (c["ex"], c["ey"]), mort
+            dernier_tir["cible"] = c["obj"] if c["type"] == "monstre" else None
+            dernier_tir["pos"] = c["pos"]
+    return fin, True, mort_premier
 
 
 # ---------------------------------------------------------------------------
 #  Dégâts partagés : tir, zap_chaine (jambières), dash (torse)
 # ---------------------------------------------------------------------------
-def _blesser_monstre(m, degats, cles, joueur):
-    """Inflige des dégâts à un monstre (kill + butin gérés). -> True s'il est mort."""
-    m.hp -= degats
+def _blesser_monstre(m, degats, cles, joueur, ox=None, oz=None):
+    """Inflige des dégâts à un monstre (kill, score, butin, effets). (ox, oz) = origine du coup (un Polygone
+    Shield absorbe les coups qui touchent une de ses faces debout). -> True s'il est mort."""
+    if m.allie:
+        return False
+    degats *= m.vuln                                          # Contrôle / Corruption : dégâts subis augmentés
+    if ox is None:
+        ox, oz = config.cam_x, config.cam_z
     m.hit = 0.12
+    if m.encaisser(degats, ox, oz) == ABSORBE:
+        rendu_monstres.casser_face(m)
+        return False
     if m.hp > 0:
+        effets.etincelles((m.x, _hauteur_centre(m), m.z), (255, 30, 30), n=6)   # ROUGE VIF
+        effets.onde(m.x, m.z, amp=config.ONDE_TIR_AMP)
         return False
     for cle in cles:
         if m in monstres_caches[cle]:
             monstres_caches[cle].remove(m)
             break
     joueur.kills += 1
+    joueur.score += m.data.get("score", 100)
     joueur.t_kill = 0.25
+    rendu_monstres.mort_monstre(m)
     deposer_butin(m.x, m.z)
     return True
 
@@ -316,10 +554,9 @@ def _zap_chaine(depart, cles, joueur, degats):
     if n <= 0:
         return
     dmg = degats * (1.0 + config.ZAP_BONUS_DEGATS)
-    cur = (depart.x, _hauteur_centre(depart) if hasattr(depart, "data") else
-           get_hauteur_sol(depart.x, depart.z) - config.BOSS_HAUTEUR_CENTRE, depart.z)
+    cur = depart.centre() if hasattr(depart, "centre") else (depart.x, _hauteur_centre(depart), depart.z)
     touches = {id(depart)}
-    mons = [m for cle in cles for m in monstres_caches[cle]]
+    mons = [m for cle in cles for m in monstres_caches[cle] if m.ciblable]
     for _ in range(n):
         meilleur, d_min = None, config.ZAP_PORTEE
         for m in mons:
@@ -336,10 +573,10 @@ def _zap_chaine(depart, cles, joueur, degats):
         touches.add(id(meilleur))
         if meilleur is b:
             boss_module.toucher_boss(dmg)
-            cible = (b.x, get_hauteur_sol(b.x, b.z) - config.BOSS_HAUTEUR_CENTRE, b.z)
+            cible = b.centre()
         else:
             cible = (meilleur.x, _hauteur_centre(meilleur), meilleur.z)
-            _blesser_monstre(meilleur, dmg, cles, joueur)
+            _blesser_monstre(meilleur, dmg, cles, joueur, cur[0], cur[2])
         zaps.append([cur[0], cur[1], cur[2], cible[0], cible[1], cible[2], 0.25])
         cur = cible
 
@@ -360,9 +597,9 @@ def degats_zone_segment(cles, x0, z0, x1, z1, rayon, degats, joueur):
         return math.hypot(x - (x0 + sx * t), z - (z0 + sz * t))
 
     nb = 0
-    for m in [m for cle in cles for m in monstres_caches[cle]]:
+    for m in [m for cle in cles for m in monstres_caches[cle] if m.ciblable]:
         if dist(m.x, m.z) < rayon:
-            _blesser_monstre(m, degats, cles, joueur)
+            _blesser_monstre(m, degats, cles, joueur, x0, z0)
             nb += 1
     b = _boss_ciblable()
     if b is not None and dist(b.x, b.z) < rayon + 60:

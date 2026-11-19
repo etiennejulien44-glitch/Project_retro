@@ -77,6 +77,7 @@ CATALOGUE = {
             ("sprint_mult_dmg", 0.20, 0.60),   # +20% à +60% dégâts en sprint
         ],
     },
+    #Hors_Sujet doit augementer les stats des armures EQUIPE et non celle dans le sac sa n a aucun sense
     "ram_ext": {
         "nom": "Extension RAM", "type": "ram", "taille": "5MB",
         "stat_principale": ("poids_max_buff", 0.01, 1.00),   # +1% à +100% de poids max transportable

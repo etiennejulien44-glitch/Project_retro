@@ -65,12 +65,29 @@ class Ciel:
         self.soleil_dir = np.array([[math.cos(e) * math.sin(SOLEIL_AZIMUT), -math.sin(e),
                                      math.cos(e) * math.cos(SOLEIL_AZIMUT)]])
         self.soleil_bandes = self._construire_soleil()
+        self._prerendre()
 
         # --- montagnes lointaines (azimut, demi-largeur angulaire, hauteur px) ---
         self.montagnes = []
         for k in range(NB_MONTAGNES):
             az = (k + rng.uniform(-0.3, 0.3)) * 2 * math.pi / NB_MONTAGNES
             self.montagnes.append((az, rng.uniform(0.05, 0.11), rng.uniform(28, 75)))
+
+    def _prerendre(self):
+        """Dégradé du ciel et soleil dessinés UNE fois dans des surfaces : 1 blit par frame au lieu de ~50 rect()."""
+        W, n = config.LARGEUR, len(self.bandes)
+        self.degrade = pygame.Surface((W, SPAN_CIEL))
+        self.degrade.fill(self.couleur_haut)
+        for i, col in enumerate(self.bandes):                    # i = 0 : contre l'horizon (en bas de la surface)
+            bas = SPAN_CIEL - i * HAUTEUR_BANDE
+            pygame.draw.rect(self.degrade, col, (0, bas - HAUTEUR_BANDE, W, HAUTEUR_BANDE + 1))
+        r = SOLEIL_RAYON
+        self.soleil = pygame.Surface((2 * r, 2 * r))
+        cle = (255, 0, 255)
+        self.soleil.fill(cle)
+        self.soleil.set_colorkey(cle)
+        for dy, hw, h, col in self.soleil_bandes:
+            pygame.draw.rect(self.soleil, col, (r - hw, dy + r, 2 * hw, h))
 
     def _construire_soleil(self):
         """Bandes horizontales du soleil, avec des 'coupures' de plus en plus larges vers le bas."""
@@ -109,31 +126,27 @@ class Ciel:
         tan_p = config.SIN_PITCH / config.COS_PITCH
         hy = int(max(-10000, min(10000, H * 0.5 - tan_p * F)))
 
-        # 1) dégradé du ciel en bandes (utilise la couleur du biome si fournie, sinon le haut par défaut)
+        # 1) dégradé du ciel (surface pré-rendue)
         couleur_fond = couleur_fond_biome if couleur_fond_biome is not None else self.couleur_haut
         surf.fill(couleur_fond)
-        for i, col in enumerate(self.bandes):
-            bas = hy - i * HAUTEUR_BANDE
-            haut = bas - HAUTEUR_BANDE
-            if bas <= 0 or haut >= H:
-                continue
-            rect(surf, col, (0, haut, W, HAUTEUR_BANDE + 1))
+        if hy > 0:
+            surf.blit(self.degrade, (0, hy - SPAN_CIEL))
 
-        # 2) étoiles (scintillent doucement)
+        # 2) étoiles (scintillent doucement) : on ne boucle que sur celles qui sont à l'écran
         ex, ey, ok = self._projeter_dirs(self.et_dirs)
-        lum = self.et_bright * (0.7 + 0.3 * np.sin(temps * 2.0 + self.et_phase))
-        for x, y, o, b in zip(ex.tolist(), ey.tolist(), ok.tolist(), lum.tolist()):
-            if o and 0 <= x < W and 0 <= y < hy - 6:
-                c = int(255 * b)
-                rect(surf, (c, int(c * 0.75), 255), (int(x), int(y), 2, 2))
+        vis = ok & (ex >= 0) & (ex < W) & (ey >= 0) & (ey < hy - 6)
+        if vis.any():
+            lum = (self.et_bright * (0.7 + 0.3 * np.sin(temps * 2.0 + self.et_phase)))[vis]
+            c = (255 * lum).astype(np.int32)
+            for x, y, ci in zip(ex[vis].astype(int).tolist(), ey[vis].astype(int).tolist(), c.tolist()):
+                rect(surf, (ci, int(ci * 0.75), 255), (x, y, 2, 2))
 
-        # 3) soleil rayé
+        # 3) soleil rayé (surface pré-rendue)
         sx, sy, sok = self._projeter_dirs(self.soleil_dir)
         if sok[0]:
             sx, sy = int(sx[0]), int(sy[0])
             if -SOLEIL_RAYON < sx < W + SOLEIL_RAYON:
-                for dy, hw, h, col in self.soleil_bandes:
-                    rect(surf, col, (sx - hw, sy + dy, 2 * hw, h))
+                surf.blit(self.soleil, (sx - SOLEIL_RAYON, sy - SOLEIL_RAYON))
 
         # 4) montagnes à l'horizon
         yaw = math.radians(config.yaw)

@@ -15,3 +15,30 @@ Ver 0.0.2
 -Refactor: registres data-driven (bestiaire, biomes, boosts, coffres, pickups) -> 1 entrée = 1 ajout
 -Fix: pickup munitions ne disparait plus quand la réserve est pleine
 Ver 0.0.4
+
+
+Ver 0.0.5
+-Add: 3 nouveaux ennemis (data/bestiaire.py) : Striker (rayon d'énergie), Polygone Shield (faces destructibles, coeur vulnérable), Phasme (distorsion de grille, surgit au dernier moment)
+-Add: IA en registre @comportement("nom") dans world/entity.py, rendu en registre @rendu("nom") dans engine/rendu_monstres.py
+-Add: score (par ennemi) + boss à PALIERS DE SCORE (data/boss_def.py) : Cube rotatif (ondes néons à sauter), Icosaèdre (tourelles satellites), Spider Boss
+-Add: game juice (engine/effets.py) : Vertex Shatter, Grid Wave, FOV dynamique (dash/sprint), étincelles rouges à l'impact, halo étendu aux nouveaux éléments
+-Add: options (cd option dans le terminal / reglages.json) : fps_max, vsync, plein écran, distance, qualité (auto/bas/moyen/haut), particules, résolution interne
+-Perf: qualité adaptative en direct, fenêtre pygame.SCALED, pause = scène figée, décors opaques en 1 projection + back-face culling,
+       coffres/butins/projectiles vectorisés, polices/surfaces en cache (plus de SysFont par frame), préchauffage d'un chunk par frame,
+       ciel pré-rendu, ramasse-miettes réglé
+-Tests: tests/smoke.py (comportements), tests/bench.py (benchmark ; --real pour vrai pygame)
+
+
+Ver 0.0.6  (réorganisation)
+-Refactor: main.py = fenêtre + événements ; world/jeu.py = règles ; engine/ = tout l'affichage (scene, affichage, ciel, assets...) ; ui/ = interface ; data/ = définitions pures (aucune dépendance)
+-Data: data/monstres.py (un bloc = modèle + stats + biomes, défauts par comportement, validation), data/armes.py, data/armures.py, data/stats.py (stats déclaratives),
+       data/raretes.py, data/boosts.py (définitions) / world/butin.py (logique), data/controles.py, data/sprites.py ; world/inventaire.py (ex data/equipements.py)
+-UI: panneau d'équipement permanent à droite (avatar animé, boosts de chaque pièce, boosts actifs), suppression des blocs noirs (HUD arme, debug, popups, barre de boss), terminal : complétion TAB
+-Add: engine/assets.py (images + atlas JSON 8 directions), assets/ intégrés
+
+Ver 0.0.7  (arbre de compétences)
+-Add: arbre de compétences complet du GDD (4 branches, 20 compétences) : data/competences.py, world/competences.py, formule universelle, PC, ultime unique
+-Add: Mobilité (dash gouverné par la compétence, speed_damage, suppression rapide), Contrôle (champ, stacking, piratage allié), AOE (onde, ricochet, pénétration, dôme), Synth (corruption 2 phases, contagion, accrue, propagation létale)
+-Add: barre de compétences (recharges), affichage du dôme / sillages / infos de piratage, alliés cyan et corrompus violets
+-Terminal: réécrit (couleurs par rareté, colonnes, retour à la ligne, défilement fluide, curseur), commandes up / ult / respec / cd skills
+-Change: stat d'armure dash_atq = niveaux de dash gratuits ; plus de fenêtre noire sur les compétences

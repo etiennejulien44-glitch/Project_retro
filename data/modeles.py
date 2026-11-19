@@ -249,3 +249,90 @@ MODELE_CRISTAL = _octa(28, -28)
 # --- Monstres ---
 MODELE_TOURELLE = _boite(36, 10, 36) + _boite(24, 18, 24, y0=-10) + [((0, -19, 12), (0, -19, 42)), ((6, -19, 12), (6, -19, 42))]
 MODELE_GLITCH = _boite(16, 16, 16, y0=-4) + _boite(16, 16, 16, y0=-8) + [((-8, -20, -8), (-14, -34, -12)), ((8, -20, 8), (14, -34, 12))]
+
+
+# =============================================================
+#  Générateurs pour les nouveaux ennemis / boss géométriques
+# =============================================================
+import itertools as _it
+import math as _math
+
+
+def _decaler(segs, dx=0.0, dy=0.0, dz=0.0):
+    return [((a[0] + dx, a[1] + dy, a[2] + dz), (b[0] + dx, b[1] + dy, b[2] + dz)) for a, b in segs]
+
+
+def _aretes(sommets, longueur, tol=1e-3):
+    """Toutes les paires de sommets distantes de `longueur` (arêtes d'un polyèdre régulier)."""
+    segs = []
+    for a, b in _it.combinations(sommets, 2):
+        if abs(_math.dist(a, b) - longueur) < tol * max(1.0, longueur):
+            segs.append((a, b))
+    return segs
+
+
+def modele_cube(r):
+    """Cube centré (origine au centre), demi-arête r."""
+    s = [(x * r, y * r, z * r) for x in (-1, 1) for y in (-1, 1) for z in (-1, 1)]
+    return _aretes(s, 2 * r)
+
+
+def modele_icosaedre(r):
+    """Icosaèdre régulier centré, rayon circonscrit r."""
+    phi = (1 + _math.sqrt(5)) / 2
+    brut = []
+    for a in (-1, 1):
+        for b in (-phi, phi):
+            brut += [(0, a, b), (a, b, 0), (b, 0, a)]
+    n = _math.sqrt(1 + phi * phi)
+    s = [(x / n * r, y / n * r, z / n * r) for x, y, z in brut]
+    # arête = 2 / n * r
+    return _aretes(s, 2.0 / n * r)
+
+
+def modele_octaedre_centre(r):
+    return _octaedre(r, 0)
+
+
+# Phasme : trois pointes en gerbe qui jaillissent du sol (y négatif = vers le haut)
+MODELE_PHASME = (_pointe(22, 70, anneaux=1)
+                 + _decaler(_pointe(14, 46), -22, 0, 6)
+                 + _decaler(_pointe(14, 40), 20, 0, -8))
+
+# Tourelle satellite du boss icosaèdre
+MODELE_SATELLITE = _octaedre(16, 0)
+
+
+def creer_pyramide_inversee(taille=1.0):
+    """Pyramide (butin au sol)."""
+    r = taille * 0.5
+    base = [(-r, 0.0, -r), (r, 0.0, -r), (r, 0.0, r), (-r, 0.0, r)]
+    apex = (0.0, -taille, 0.0)
+    segs = [(base[i], base[(i + 1) % 4]) for i in range(4)]
+    segs += [(p, apex) for p in base]
+    return segs
+
+
+MODELE_PYRAMIDE = creer_pyramide_inversee(1.0)
+
+
+# --- Aliases PUBLICS : de quoi définir un modèle directement dans data/monstres.py, decors.py, coffres.py... ---
+pointe = _pointe                 # pointe(rayon_base, hauteur, anneaux=0)
+octaedre = _octaedre             # octaedre(rayon, y_centre)
+decaler = _decaler               # decaler(segments, dx, dy, dz)
+cube = modele_cube               # cube(demi_arete)
+icosaedre = modele_icosaedre     # icosaedre(rayon)
+
+
+def boite(largeur, hauteur, profondeur, y0=0.0):
+    """Parallélépipède fil de fer posé sur le sol (y négatif = vers le haut)."""
+    w, d = largeur / 2, profondeur / 2
+    bas = [(-w, y0, -d), (w, y0, -d), (w, y0, d), (-w, y0, d)]
+    haut = [(x, y0 - hauteur, z) for x, _, z in bas]
+    return ([(bas[i], bas[(i + 1) % 4]) for i in range(4)] + [(haut[i], haut[(i + 1) % 4]) for i in range(4)]
+            + [(bas[i], haut[i]) for i in range(4)])
+
+
+def hauteur_modele(modele):
+    """Hauteur (unités, positive) d'un modèle fil de fer."""
+    return -min(min(a[1], b[1]) for a, b in modele) if modele else 0.0

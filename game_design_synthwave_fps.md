@@ -41,7 +41,7 @@ La carte est générée par **chunks** virtuels. Chaque biome modifie la couleur
 
 ## 4. Bestiaire & Boss
 
-### Ennemis Réguliers
+### Ennemis Réguliers  *(✅ implémentés : `data/monstres.py` — striker, polygone_shield, phasme)*
 1. **Le Striker (Ligne Électrique) :**
    * *Comportement :* N'a pas de volume 3D complexe, se déplace hyper vite en ligne droite vers le joueur sous forme de rayon d'énergie.
 2. **Le Polygone Shield (Bouclier Vectoriel) :**
@@ -49,13 +49,13 @@ La carte est générée par **chunks** virtuels. Chaque biome modifie la couleur
 3. **Le Phasme (Traqueur de Grille) :**
    * *Comportement :* Se déplace sous forme de distorsion directe dans la grille du sol et surgit au dernier moment.
 
-### Boss & Paliers
+### Boss & Paliers  *(✅ implémentés : `data/boss.py`, `world/boss.py`)*
 * Spawns automatiques à des paliers de score précis.
 * **Pattern :** Structures géométriques géantes (ex: Icosaèdre / Cube rotatif) qui projettent des vagues d'ondes néons ou déploient des tourelles satellites autour d'elles.
 
 ---
 
-## 5. Effets Visuels & "Game Juice" (Implémentation Pygame)
+## 5. Effets Visuels & "Game Juice" (Implémentation Pygame)  *(✅ `engine/effets.py`)*
 
 1. **Effet Halo Lumineux (*Glow*) :**
    * Tracer la ligne une première fois avec une épaisseur plus grande et une couleur sombre/transparente.
@@ -73,5 +73,5 @@ La carte est générée par **chunks** virtuels. Chaque biome modifie la couleur
 
 - [ ] Structurer le générateur de terrain par chunks avec l'attribution des biomes.
 - [ ] Implémenter le dictionnaire de couleurs/règles par biome.
-- [ ] Ajouter l'effet de particule 3D à la destruction des entités.
-- [ ] Programmer le premier type de boss à palier de score.
+- [x] Ajouter l'effet de particule 3D à la destruction des entités.
+- [x] Programmer le premier type de boss à palier de score.

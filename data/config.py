@@ -1,5 +1,6 @@
 # config.py
 import math
+from data import reglages
 
 # ---------------------------------------------------------------------------
 # Caméra / écran
@@ -15,10 +16,12 @@ pitch = 0.0
 vitesse_y = 0.0
 gravite = 600.0
 
-LARGEUR = 1920
-HAUTEUR = 1080
-FOCALE = 500.0
-DIST_AFFICHAGE_MAX = 1800.0
+# Résolution INTERNE du rendu (option "resolution", appliquée au lancement). La fenêtre est mise à
+# l'échelle par SDL (pygame.SCALED) : baisser la résolution = gros gain de FPS sans toucher au gameplay.
+LARGEUR, HAUTEUR = (int(v) for v in reglages.get("resolution").split("x"))
+FOCALE_BASE = 500.0 * HAUTEUR / 1080.0     # la focale suit la hauteur : même champ de vision à toute résolution
+FOCALE = FOCALE_BASE                       # modulée en direct par engine/effets.FovDynamique
+DIST_AFFICHAGE_MAX = float(reglages.get("distance"))
 NEAR = 20.0
 
 COS_YAW = 1.0
@@ -31,7 +34,16 @@ ECHELLE_GRILLE = 50
 EVAL_HAUTEUR = 140
 
 PAS_GRILLE = 2
-PORTEE_CHUNKS = 2
+PORTEE_CHUNKS = max(1, math.ceil(DIST_AFFICHAGE_MAX / (TAILLE_CHUNKS * ECHELLE_GRILLE)))
+
+
+def appliquer_distance(distance):
+    """Change la distance d'affichage en direct (option "distance" / qualité auto).
+    Moins de distance => moins de chunks à générer/projeter/trier => plus de FPS."""
+    global DIST_AFFICHAGE_MAX, PORTEE_TIR, PORTEE_CHUNKS
+    DIST_AFFICHAGE_MAX = float(max(600.0, distance))
+    PORTEE_TIR = DIST_AFFICHAGE_MAX
+    PORTEE_CHUNKS = max(1, math.ceil(DIST_AFFICHAGE_MAX / (TAILLE_CHUNKS * ECHELLE_GRILLE)))
 
 # ---------------------------------------------------------------------------
 # COULEURS SYNTHWAVE
@@ -121,8 +133,12 @@ RAYON_INTERACTION = 160          # distance max pour ramasser / ouvrir un coffre
 # BOSS — SPIDER BOSS
 # ---------------------------------------------------------------------------
 # Apparition
-BOSS_SPAWN_KILLS_1       = 15      # premier spawn à ce nombre de kills
-BOSS_SPAWN_KILLS_INCREMENT = 25    # kills supplémentaires pour le suivant
+# Les boss normaux apparaissent à des PALIERS DE SCORE -> voir data/boss.py (PALIERS)
+BOSS_SCORE_BONUS        = 1000     # score gagné en tuant un boss
+SATELLITE_SCORE         = 50       # score d'une tourelle satellite détruite
+BOSS_ECHELLE_MODELE     = 4.0      # échelle du modèle Spider Boss
+BOSS_ONDE_EPAISSEUR     = 45       # demi-épaisseur d'une onde néon (zone qui blesse)
+BOSS_ONDE_SAUT_MIN      = 45       # hauteur de saut (unités) qui permet de passer par-dessus une onde
 BOSS_FINAL_PV_MULT      = 2.0     # boss final = spider boss x2 PV
 BOSS_SPAWN_DISTANCE      = 700     # distance de spawn (unités monde)
 BOSS_SPAWN_ANIM_DUREE    = 2.0     # durée de la barre qui se remplit
@@ -171,7 +187,7 @@ BOSS_NB_DROPS     = 2
 BOSS_DROPS_POOL   = ["VIE_J", "VITESSE_J", "SAUT_J", "DEGATS_J", "AUTO_REGEN_R"]
 
 # ---------------------------------------------------------------------------
-# ÉQUIPEMENTS (armures, poids transportable, effets) -- recalculés par data/equipements.appliquer_config()
+# ÉQUIPEMENTS (armures, poids transportable, effets) -- recalculés par world/inventaire.appliquer_config()
 # ---------------------------------------------------------------------------
 POIDS_MAX_BASE_MB = 100         # poids max transportable sans RAM (chaque objet pèse 5 à 20 MB)
 
@@ -180,6 +196,8 @@ REDUCTION_DEGATS = 0.0
 BONUS_HP = 0.0
 BONUS_VITESSE = 0.0
 BONUS_DEGATS_BASE = 0.0
+BONUS_CADENCE = 0.0
+GRAVITE_MULT = 1.0              # modifié par la compétence Propagation létale
 BUFF_POIDS_MAX = 0.0
 REGEN_EQUIP = 0.0
 AUTO_AIM = 0.0
@@ -214,3 +232,16 @@ def mettre_a_jour_rayons():
     SIN_YAW = math.sin(rad_yaw)
     COS_PITCH = math.cos(rad_pitch)
     SIN_PITCH = math.sin(rad_pitch)
+
+# ---------------------------------------------------------------------------
+# GAME JUICE (engine/effets.py)
+# ---------------------------------------------------------------------------
+FOV_DASH_BOOST = 0.30        # +30% de focale au pic d'un dash (étire la perspective). Négatif = effet inverse
+FOV_DASH_DUREE = 0.55        # durée de l'impulsion (s)
+FOV_SPRINT_BOOST = 0.06      # +6% de focale en sprint
+FOV_LISSAGE = 9.0            # vitesse de rattrapage vers la valeur cible
+
+GRAVITE_PARTICULES = 520.0   # (Y vers le bas)
+ONDE_TIR_AMP = 7.0           # amplitude (unités) de l'ondulation de grille à l'impact d'un tir
+ONDE_MORT_AMP = 28.0         # ... à la mort d'un ennemi
+ONDE_DASH_AMP = 22.0         # ... à l'arrivée d'un dash
